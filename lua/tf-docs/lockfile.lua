@@ -1,5 +1,6 @@
 local cache = require("tf-docs.cache")
 local hcl = require("tf-docs.hcl")
+local utils = require("tf-docs.utils")
 
 local M = {}
 
@@ -9,17 +10,6 @@ local M = {}
 
 ---@type table<string, table<string, TfDocsLockfileMeta>>
 local meta_by_root = {}
-
-local function read_file(path)
-  if vim.fn.filereadable(path) == 0 then
-    return nil
-  end
-  local ok, lines = pcall(vim.fn.readfile, path)
-  if not ok then
-    return nil
-  end
-  return table.concat(lines, "\n")
-end
 
 local function normalize_source(source)
   return source:gsub("^registry%.terraform%.io/", "")
@@ -111,7 +101,7 @@ function M.resolve(root)
   end
 
   local path = vim.fs.joinpath(root, ".terraform.lock.hcl")
-  local content = read_file(path)
+  local content = utils.read_file(path)
   if not content then
     cache.set_lockfile(root, {})
     meta_by_root[root] = {}

@@ -1,18 +1,8 @@
 local cache = require("tf-docs.cache")
 local hcl = require("tf-docs.hcl")
+local utils = require("tf-docs.utils")
 
 local M = {}
-
-local function read_file(path)
-  if vim.fn.filereadable(path) == 0 then
-    return nil
-  end
-  local ok, lines = pcall(vim.fn.readfile, path)
-  if not ok then
-    return nil
-  end
-  return table.concat(lines, "\n")
-end
 
 ---@param text string
 ---@return table<string, string>
@@ -121,7 +111,7 @@ function M.resolve(root, cfg)
   -- Merge priority: later files override earlier ones (based on cfg.required_providers_files order).
   for _, filename in ipairs(cfg.required_providers_files) do
     local path = vim.fs.joinpath(root, filename)
-    local content = read_file(path)
+    local content = utils.read_file(path)
     if content then
       local parsed = M.parse_text(content)
       for alias, source in pairs(parsed) do
