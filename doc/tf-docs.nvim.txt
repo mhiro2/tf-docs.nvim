@@ -1,59 +1,169 @@
 *tf-docs.nvim*   Context-aware Terraform docs for Neovim
 
 ==============================================================================
-INTRO                                                    *tf-docs.nvim-intro*
+CONTENTS                                               *tf-docs.nvim-contents*
+
+  1. Introduction ............................... |tf-docs.nvim-introduction|
+  2. Requirements .............................. |tf-docs.nvim-requirements|
+  3. Setup ..................................... |tf-docs.nvim-setup|
+  4. LSP Integration ........................... |tf-docs.nvim-lsp|
+  5. Commands .................................. |tf-docs.nvim-commands|
+  6. Configuration ............................. |tf-docs.nvim-config|
+  7. Resolution Flow ........................... |tf-docs.nvim-resolution|
+  8. Examples .................................. |tf-docs.nvim-examples|
+  9. Troubleshooting .......................... |tf-docs.nvim-troubleshooting|
+ 10. FAQ ....................................... |tf-docs.nvim-faq|
+ 11. LICENSE ................................... |tf-docs.nvim-license|
+
+==============================================================================
+1. INTRODUCTION                                    *tf-docs.nvim-introduction*
 
 `tf-docs.nvim` opens the correct Terraform Registry docs for the symbol under
-cursor. It resolves provider namespace and version using:
+your cursor. It resolves provider namespace and version using:
 - terraform { required_providers { ... } }
 - .terraform.lock.hcl
 
-It supports resource/data/module blocks and optionally adds anchors for
-attributes or nested blocks (best-effort).
+This is designed to eliminate repeated Google searches and reduce context
+switching while authoring Terraform.
+
+Features:
+- Open docs for resource/data/module blocks under cursor
+- Resolve provider source (namespace/name) from required_providers
+- Resolve provider version from .terraform.lock.hcl
+- Best-effort deep linking to the argument/block under cursor (#anchor)
+- Open URLs via vim.ui.open() (cross-platform)
+- Copy resolved URL to clipboard
+- Peek resolved info (URL + trace) in a floating window
+- Print resolution trace for debugging
+- Clear internal caches
 
 ==============================================================================
-REQUIREMENTS                                           *tf-docs.nvim-require*
+2. REQUIREMENTS                                    *tf-docs.nvim-requirements*
 
 - Neovim 0.10+
 - nvim-treesitter with terraform/hcl parser(s)
+  - Install parsers via :TSInstall terraform (and optionally :TSInstall hcl)
+
+No external commands are required for the default workflow.
 
 ==============================================================================
-SETUP                                                      *tf-docs.nvim-setup*
+3. SETUP                                                  *tf-docs.nvim-setup*
 
-Basic setup:
-
+Basic setup with lazy.nvim:
 >lua
-  require("tf-docs").setup()
+  {
+    "mhiro2/tf-docs.nvim",
+    dependencies = { "nvim-treesitter/nvim-treesitter" },
+    ft = { "terraform", "hcl" },
+    config = function()
+      require("tf-docs").setup()
 
-  vim.keymap.set("n", "K", "<cmd>TfDocOpen<cr>",
-    { desc = "Terraform: open docs" })
+      -- Keymaps
+      vim.keymap.set("n", "gK", "<cmd>TfDocOpen<cr>",
+        { desc = "Terraform: open docs" })
+      vim.keymap.set("n", "gY", "<cmd>TfDocCopyUrl<cr>",
+        { desc = "Terraform: copy docs URL" })
+    end,
+  }
+<
+
+If you manage Treesitter parsers via ensure_installed:
+>lua
+  require("nvim-treesitter.configs").setup({
+    ensure_installed = { "hcl", "terraform" },
+  })
 <
 
 ==============================================================================
-COMMANDS                                               *tf-docs.nvim-commands*
+4. LSP INTEGRATION                                      *tf-docs.nvim-lsp*
 
-:TfDocOpen         Open docs for resource/data/module under cursor.
-:TfDocCopyUrl      Copy resolved URL to clipboard.
-:TfDocDebug        Print a resolution trace in :messages.
-:TfDocPeek         Show a small floating window with resolved info.
-:TfDocClearCache   Clear internal caches (root/provider/lockfile resolution).
+If your LSP config maps K in on_attach, it will override FileType mappings.
+To route tf-docs -> LSP hover when docs aren't available:
+>lua
+  vim.api.nvim_create_autocmd("LspAttach", {
+    callback = function(args)
+      local buf = args.buf
+      local ft = vim.bo[buf].filetype
+      if ft ~= "terraform" and ft ~= "hcl" then
+        return
+      end
+
+      vim.schedule(function()
+        vim.keymap.set("n", "K", function()
+          local ok_resolver, resolver = pcall(require, "tf-docs.resolver")
+          local ok_ui, ui = pcall(require, "tf-docs.ui")
+          if ok_resolver and ok_ui then
+            local ok, url = pcall(function()
+              return resolver.resolve(0)
+            end)
+            if ok and url and url ~= "" then
+              ui.open(url)
+              return
+            end
+          end
+          if vim.lsp and vim.lsp.buf and vim.lsp.buf.hover then
+            vim.lsp.buf.hover()
+          end
+        end, { buffer = buf, desc = "Terraform: docs or hover" })
+      end)
+    end,
+  })
+<
 
 ==============================================================================
-CONFIG                                                     *tf-docs.nvim-config*
+5. COMMANDS                                           *tf-docs.nvim-commands*
+
+:TfDocOpen                                                  *:TfDocOpen*
+        Resolve context (resource/data/module) and open the Terraform
+        Registry URL in your default browser via vim.ui.open().
+
+:TfDocCopyUrl                                             *:TfDocCopyUrl*
+        Resolve and copy the URL to your clipboard.
+
+:TfDocDebug                                                 *:TfDocDebug*
+        Print a resolution trace showing:
+          - root directory
+          - kind (resource/data/module)
+          - type name
+          - module source
+          - provider source (namespace/name)
+          - provider version
+          - anchor (if applicable)
+          - final URL
+          - reason (if resolution failed)
+
+:TfDocPeek                                                   *:TfDocPeek*
+        Show a lightweight "peek" UI with resolved URL and trace in a
+        floating window.
+
+:TfDocClearCache                                         *:TfDocClearCache*
+        Clear internal caches (root/provider/lockfile resolution). Use this
+        after changing required_providers or .terraform.lock.hcl.
+
+==============================================================================
+6. CONFIGURATION                                        *tf-docs.nvim-config*
 
 Default config:
-
 >lua
-  require("tf-docs").setup({
-    root_markers = { ".terraform.lock.hcl", "terraform.tf", "main.tf", ".git" },
+  {
+    -- Root detection markers (priority order; first match wins)
+    root_markers = {
+      ".terraform.lock.hcl",
+      "terraform.tf",
+      "main.tf",
+      ".git",
+    },
 
+    -- Fallback values when resolution fails
     default_namespace = "hashicorp",
     default_version = "latest",
 
+    -- Files to scan for required_providers (best-effort, per root)
     required_providers_files = {
       "versions.tf", "providers.tf", "main.tf", "terraform.tf",
     },
 
+    -- Best-effort attribute/block anchor links
     enable_anchor = true,
     anchor_providers_allowlist = {
       "hashicorp/aws",
@@ -61,91 +171,188 @@ Default config:
       "hashicorp/azurerm",
     },
 
+    -- Override inferred provider name
+    -- Example: { google-beta = "google" }
     provider_overrides = {},
 
+    -- Module docs (best-effort)
     enable_module_docs = true,
 
+    -- Notification threshold
     log_level = "warn", -- "debug" | "info" | "warn" | "error"
-  })
+  }
 <
 
-Notes:
-- root_markers                                    *tf-docs.nvim-root_markers*
-  Root detection markers (priority order; first match wins). Commonly include
-  .terraform.lock.hcl or .git.
+Configuration options:
+root_markers                                       *tf-docs.nvim-root_markers*
+        Root detection markers (priority order; first match wins). Commonly
+        include .terraform.lock.hcl or .git.
 
-- required_providers_files                *tf-docs.nvim-required_providers_files*
-  Files scanned (best-effort) to resolve:
-    terraform { required_providers { ... } }
+default_namespace                             *tf-docs.nvim-default_namespace*
+        Fallback namespace when required_providers is missing. Default is
+        "hashicorp".
 
-- enable_anchor / anchor_providers_allowlist        *tf-docs.nvim-enable_anchor*
-  When enabled, tf-docs may append "#anchor-1" based on the argument/block under
-  the cursor. This is best-effort and limited by allowlist because anchors are
-  not stable across all providers.
+default_version                                 *tf-docs.nvim-default_version*
+        Fallback version when lockfile is missing. Default is "latest".
 
-- provider_overrides                            *tf-docs.nvim-provider_overrides*
-  Override inferred provider name.
-  Example: { google-beta = "google" } (so google-beta_* types resolve via google).
-  If a resource/data block includes "provider = <alias>", tf-docs prefers that
-  alias, then applies this override map.
+required_providers_files               *tf-docs.nvim-required_providers_files*
+        Files scanned (best-effort) to resolve:
+          terraform { required_providers { ... } }
 
-- enable_module_docs                          *tf-docs.nvim-enable_module_docs*
-  When enabled and the cursor is inside a module block, tf-docs tries to build a
-  URL from `source = "..."` and open it:
-    - Terraform Registry modules:
-        "namespace/name/provider"
-        "registry.terraform.io/namespace/name/provider"
-    - VCS/URL sources:
-        "https://...", "ssh://...", "git@..."
-      (with light cleanup: strip query, drop //subdir, etc.)
-  If a URL can't be built, module resolution is treated as "unresolved".
+enable_anchor                                     *tf-docs.nvim-enable_anchor*
+        When enabled, tf-docs may append "#anchor-1" based on the
+        argument/block under the cursor. This is best-effort and limited by
+        allowlist because anchors are not stable across all providers.
 
-- log_level                                        *tf-docs.nvim-log_level*
-  Notification threshold:
-    - debug: show everything
-    - info : include informational messages
-    - warn : warnings + errors (default)
-    - error: only errors
+anchor_providers_allowlist           *tf-docs.nvim-anchor_providers_allowlist*
+        Allowlist for providers where anchor resolution is attempted.
+
+provider_overrides                           *tf-docs.nvim-provider_overrides*
+        Override inferred provider name.
+        Example: { google-beta = "google" } (so google-beta_* types
+        resolve via google). If a resource/data block includes
+        "provider = <alias>",
+        tf-docs prefers that alias, then applies this override map.
+
+enable_module_docs                           *tf-docs.nvim-enable_module_docs*
+        When enabled and the cursor is inside a module block, tf-docs tries to
+        build a URL from `source = "..."` and open it:
+          - Terraform Registry modules:
+              "namespace/name/provider"
+              "registry.terraform.io/namespace/name/provider"
+          - VCS/URL sources:
+              "https://...", "ssh://...", "git@..."
+            (with light cleanup: strip query, drop //subdir, etc.)
+        If a URL can't be built, module resolution is treated as "unresolved".
+
+log_level                                             *tf-docs.nvim-log_level*
+        Notification threshold:
+          - debug: show everything
+          - info : include informational messages
+          - warn : warnings + errors (default)
+          - error: only errors
 
 ==============================================================================
-RESOLUTION FLOW                                       *tf-docs.nvim-resolution*
+7. RESOLUTION FLOW                                   *tf-docs.nvim-resolution*
 
+For a type like `google_compute_instance`:
 1. Detect context under cursor (resource/data/module).
 2. Infer provider from type prefix (e.g. aws_instance -> aws).
-3. Resolve provider source from required_providers or lockfile.
+   - If provider = <alias> is set in the block, that alias is preferred.
+3. Resolve provider source (namespace/name) from required_providers.
 4. Resolve provider version from .terraform.lock.hcl.
 5. Build Terraform Registry URL.
 6. Optionally append anchor if allowlisted.
 
-==============================================================================
-TROUBLESHOOTING                                     *tf-docs.nvim-troubleshoot*
-
-No terraform resource/data/module under cursor:
-- Ensure filetype is terraform/hcl
-- Ensure nvim-treesitter parser is installed
-
-Wrong provider namespace or version:
-- Use :TfDocDebug to inspect resolution trace
-- Ensure required_providers files and .terraform.lock.hcl exist in root
-
-Cache invalidation:
-- Caches are cleared automatically when you write .terraform.lock.hcl
-- Caches are cleared automatically when you write any file in
-  required_providers_files
-- You can also run :TfDocClearCache to clear caches manually
-
-Open URL failures:
-- If vim.ui.open fails, tf-docs logs the error via vim.notify
-- See :messages for details and confirm OS integration
+Fallbacks:
+  - If required_providers is missing: use default_namespace
+    (default: hashicorp)
+  - If lockfile is missing: use default_version (default: latest)
 
 ==============================================================================
-HEALTH                                                   *tf-docs.nvim-health*
+8. EXAMPLES                                            *tf-docs.nvim-examples*
 
-Use :checkhealth tf-docs to verify environment.
+Resource example:
+>lua
+  resource "google_compute_instance" "vm" {
+    # cursor anywhere inside this block
+  }
+<
+
+Opens:
+  https://registry.terraform.io/providers/hashicorp/google/<version>/docs/
+  resources/compute_instance
+
+Data source example:
+>lua
+  data "aws_ami" "ubuntu" {
+    # ...
+  }
+<
+
+Opens:
+  https://registry.terraform.io/providers/hashicorp/aws/<version>/docs/
+  data-sources/ami
+
+Custom provider source example:
+>lua
+  terraform {
+    required_providers {
+      mycloud = {
+        source = "mycorp/mycloud"
+      }
+    }
+  }
+
+  resource "mycloud_instance" "x" {}
+<
+
+Opens:
+  https://registry.terraform.io/providers/mycorp/mycloud/<version>/docs/
+  resources/instance
+
+Anchors (best-effort):
+If your cursor is on `boot_disk` inside `google_compute_instance`, tf-docs may
+append: `#boot_disk-1`
+
+Anchor behavior is not guaranteed across all providers and is intentionally
+limited by allowlist.
 
 ==============================================================================
-LICENSE                                                  *tf-docs.nvim-license*
+9. TROUBLESHOOTING                              *tf-docs.nvim-troubleshooting*
+
+"No terraform resource/data/module under cursor"
+  - Ensure your buffer filetype is `terraform` or `hcl`:
+    :set filetype?
+  - Ensure `nvim-treesitter` parser is installed:
+    :TSInstall terraform
+    :TSInstall hcl  (optional)
+
+"Wrong provider namespace or version"
+  - Check :TfDocDebug output for details
+  - Ensure terraform { required_providers { ... } } exists in files listed in
+    required_providers_files
+  - Ensure .terraform.lock.hcl exists in the detected root
+  - For monorepos: confirm root detection matches your intended module (marker
+    order wins)
+
+"Cache invalidation"
+  tf-docs caches root/provider/lockfile resolution. The cache is automatically
+  cleared when you write:
+    - .terraform.lock.hcl
+    - any file listed in required_providers_files
+  You can also clear caches manually with: :TfDocClearCache
+
+"Open URL failures"
+  - This plugin uses vim.ui.open() (Neovim 0.10+)
+  - If vim.ui.open() fails, tf-docs logs the error via vim.notify
+    (see :messages)
+  - If your system cannot open URLs, verify your Neovim build and
+    OS integration
+
+Health check:
+Use :checkhealth tf-docs to verify your environment:
+  - Neovim version
+  - vim.ui.open availability
+  - Treesitter parser availability
+
+==============================================================================
+10. FAQ                                                     *tf-docs.nvim-faq*
+
+Q: Why not just use Terraform CLI for schema?
+A: This plugin focuses on opening the right Terraform Registry docs
+   quickly and
+   avoids external dependencies by default.
+
+Q: Isn't there already a plugin for this?
+A: Yes—several plugins open Terraform docs. tf-docs.nvim differentiates by
+   being workspace-aware (namespace + lockfile version) and by focusing on
+   cursor-context-first UX.
+
+==============================================================================
+11. LICENSE                                              *tf-docs.nvim-license*
 
 MIT
 
+==============================================================================
 vim:tw=78:ts=2:et
