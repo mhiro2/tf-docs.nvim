@@ -19,7 +19,7 @@ function M.get_root(bufnr, cfg)
   local dir = vim.fs.dirname(path)
 
   for _, marker in ipairs(cfg.root_markers) do
-    local found = vim.fs.find(marker, { path = dir, upward = true })
+    local found = vim.fs.find(marker, { path = dir, upward = true, limit = 1 })
     if found and found[1] then
       local root = vim.fs.dirname(found[1])
       cache.set_root(bufnr, root)

@@ -66,7 +66,7 @@ local function validate(cfg)
     warn(
       string.format(
         "tf-docs.nvim: invalid log_level=%s (fallback to %s)",
-        vim.inspect(cfg.log_level),
+        tostring(cfg.log_level),
         default_config.log_level
       )
     )
