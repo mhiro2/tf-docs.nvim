@@ -12,6 +12,23 @@ Open the *correct* Terraform documentation for the symbol under your cursor, wit
 
 This is designed to eliminate repeated Google searches and reduce context switching while authoring Terraform.
 
+## 🎬 Demo
+
+### Select a resource/data source/module from a list and open docs
+
+<img src="https://github.com/user-attachments/assets/3632bc1a-7d29-4e37-83a9-73b94642e9f8" width="100%" alt="TfDocList: list and select" />
+
+### Peek the resolved info without leaving Neovim
+
+<img src="https://github.com/user-attachments/assets/7fce2021-aca3-4205-b8a4-b54fad63e620" width="100%" alt="TfDocPeek: quick preview" />
+
+### Open the docs for the symbol under the cursor
+
+> [!NOTE]
+> this opens your external browser via `vim.ui.open()`.
+
+<img src="https://github.com/user-attachments/assets/a3d5f753-caa4-4e6f-8866-e46e66b217e5" width="100%" alt="TfDocOpen: opens browser" />
+
 ## ✨ Features
 
 - 🔎 Open the right Terraform docs for the symbol under your cursor:
