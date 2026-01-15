@@ -24,6 +24,7 @@ This is designed to eliminate repeated Google searches and reduce context switch
 - 🌐 Open URLs via `vim.ui.open()` (cross-platform)
 - 📋 Copy resolved URL to clipboard
 - 👀 Peek resolved info (URL + trace) in a floating window
+- 📋 List all resources/data sources/modules in the current buffer
 - 🧪 Print a resolution trace for debugging
 - 🧹 Clear internal caches
 
@@ -115,7 +116,9 @@ Now place the cursor inside a Terraform block and press `gK` (or `K` if you opte
 * `:TfDocDebug`
   Print a resolution trace (root, provider source/version, kind/type, final URL).
 * `:TfDocPeek`
-  Show a lightweight “peek” UI (resolved URL + trace) in a floating window.
+  Show a lightweight "peek" UI (resolved URL + trace) in a floating window.
+* `:TfDocList`
+  List all resources/data sources/modules in the current buffer. Select one to open its documentation.
 * `:TfDocClearCache`
   Clear internal caches (root/provider/lockfile resolution). Use this after changing `required_providers` or `.terraform.lock.hcl`.
 
@@ -156,6 +159,11 @@ require("tf-docs").setup({
   -- If it can't build a URL, it falls back to "unresolved".
   enable_module_docs = true,
 
+  -- UI backend for selection (e.g., `:TfDocList`).
+  -- "auto": Detect and use external UI plugins (telescope/fzf-lua/snacks) if available, otherwise use built-in.
+  -- "builtin": Always use built-in simple float window UI.
+  ui_select_backend = "auto", -- "auto" | "builtin"
+
   -- Notification threshold. Useful when debugging (`:TfDocDebug`), otherwise you can ignore it.
   log_level = "warn", -- "debug" | "info" | "warn" | "error"
 })
@@ -181,6 +189,29 @@ Fallbacks:
 If a resource/data block includes `provider = <alias>`, tf-docs prefers that
 alias when inferring the provider. You can normalize aliases via
 `provider_overrides` before URL building (e.g. `google-beta` -> `google`).
+
+### UI customization for `:TfDocList`
+
+The `:TfDocList` command uses a built-in simple float window UI by default. You can customize this behavior:
+
+* **Auto (default)**: Automatically detects and uses external UI plugins if installed:
+  - `telescope-ui-select.nvim`
+  - `fzf-lua` (with `ui_select = true`)
+  - `snacks.nvim` (picker)
+* **Built-in**: Always use the built-in cursor-relative float window
+
+If you prefer a specific UI:
+
+```lua
+require("tf-docs").setup({
+  ui_select_backend = "builtin", -- or "auto" (default)
+})
+```
+
+The built-in UI supports:
+- Navigation: `j`/`k` or `<C-n>`/`<C-p>`
+- Confirm: `<CR>`
+- Cancel: `<Esc>` or `q`
 
 ## 📚 Examples
 

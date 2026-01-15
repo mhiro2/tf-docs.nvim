@@ -34,6 +34,7 @@ Features:
 - Open URLs via vim.ui.open() (cross-platform)
 - Copy resolved URL to clipboard
 - Peek resolved info (URL + trace) in a floating window
+- List all resources/data sources/modules in the current buffer
 - Print resolution trace for debugging
 - Clear internal caches
 
@@ -136,6 +137,10 @@ To route tf-docs -> LSP hover when docs aren't available:
         Show a lightweight "peek" UI with resolved URL and trace in a
         floating window.
 
+:TfDocList                                                   *:TfDocList*
+        List all resources/data sources/modules in the current buffer and
+        open docs for the selected item.
+
 :TfDocClearCache                                         *:TfDocClearCache*
         Clear internal caches (root/provider/lockfile resolution). Use this
         after changing required_providers or .terraform.lock.hcl.
@@ -177,6 +182,9 @@ Default config:
 
     -- Module docs (best-effort)
     enable_module_docs = true,
+
+    -- UI backend for selection (e.g., :TfDocList)
+    ui_select_backend = "auto", -- "auto" | "builtin"
 
     -- Notification threshold
     log_level = "warn", -- "debug" | "info" | "warn" | "error"
@@ -224,6 +232,12 @@ enable_module_docs                           *tf-docs.nvim-enable_module_docs*
               "https://...", "ssh://...", "git@..."
             (with light cleanup: strip query, drop //subdir, etc.)
         If a URL can't be built, module resolution is treated as "unresolved".
+
+ui_select_backend                          *tf-docs.nvim-ui_select_backend*
+        UI backend for selection (e.g., :TfDocList):
+          - "auto": use external UI plugins if available (telescope-ui-select,
+            fzf-lua with ui_select, or snacks.nvim picker), otherwise built-in
+          - "builtin": always use the built-in floating list (cursor + <CR>)
 
 log_level                                             *tf-docs.nvim-log_level*
         Notification threshold:

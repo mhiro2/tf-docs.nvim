@@ -287,4 +287,36 @@ function M.get_context(bufnr)
   return nil
 end
 
+---@class TfDocsResource
+---@field kind "resource"|"data"|"module"
+---@field type string|nil
+---@field name string
+---@field line number
+
+---@param bufnr number
+---@return TfDocsResource[]
+function M.list_resources(bufnr)
+  local results = {}
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+
+  for i, line in ipairs(lines) do
+    local kind, type_name, name = line:match('^%s*(resource)%s+"([^"]+)"%s+"([^"]+)"')
+    if kind and type_name and name then
+      table.insert(results, { kind = kind, type = type_name, name = name, line = i })
+    else
+      kind, type_name, name = line:match('^%s*(data)%s+"([^"]+)"%s+"([^"]+)"')
+      if kind and type_name and name then
+        table.insert(results, { kind = kind, type = type_name, name = name, line = i })
+      else
+        kind, name = line:match('^%s*(module)%s+"([^"]+)"')
+        if kind and name then
+          table.insert(results, { kind = kind, type = nil, name = name, line = i })
+        end
+      end
+    end
+  end
+
+  return results
+end
+
 return M
