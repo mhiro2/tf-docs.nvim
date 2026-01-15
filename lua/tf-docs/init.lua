@@ -4,6 +4,7 @@ local lockfile = require("tf-docs.lockfile")
 local log = require("tf-docs.log")
 local resolver = require("tf-docs.resolver")
 local ui = require("tf-docs.ui")
+local ts = require("tf-docs.ts")
 
 local M = {}
 
@@ -79,6 +80,50 @@ local function create_commands()
     cache.clear()
     lockfile.clear_meta()
     log.log(config.get(), "info", "tf-docs.nvim cache cleared")
+  end, {})
+
+  vim.api.nvim_create_user_command("TfDocList", function()
+    local resources = ts.list_resources(0)
+    if #resources == 0 then
+      log.log(config.get(), "warn", "No terraform resources/data/modules found in current buffer")
+      return
+    end
+
+    local items = {}
+    for _, r in ipairs(resources) do
+      local label
+      if r.kind == "module" then
+        label = string.format("[%s] %s (line %d)", r.kind, r.name, r.line)
+      else
+        label = string.format("[%s] %s (line %d)", r.kind, r.type, r.line)
+      end
+      table.insert(items, { label = label, resource = r })
+    end
+
+    ui.select(items, {
+      prompt = "Select a resource to open docs:",
+      format_item = function(item)
+        return item.label
+      end,
+    }, function(selected)
+      if not selected then
+        return
+      end
+
+      local r = selected.resource
+      local original_cursor = vim.api.nvim_win_get_cursor(0)
+
+      vim.api.nvim_win_set_cursor(0, { r.line, 0 })
+      local url, trace = resolve_safe(0)
+      vim.api.nvim_win_set_cursor(0, original_cursor)
+
+      if not url then
+        notify_unresolved(trace)
+        return
+      end
+
+      ui.open(url)
+    end)
   end, {})
 
   commands_created = true

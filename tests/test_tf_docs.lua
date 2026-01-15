@@ -406,6 +406,54 @@ T["anchor allowlist OFF keeps URL without anchor"] = function()
   expect.equality(url, "https://registry.terraform.io/providers/hashicorp/aws/9.9.9/docs/resources/instance")
 end
 
+T["ts.list_resources returns all resources and data sources"] = function()
+  reset_state()
+  local ts = require("tf-docs.ts")
+  local lines = {
+    'resource "aws_instance" "web" {',
+    '  ami = "ami-123"',
+    "}",
+    "",
+    'data "aws_ami" "ubuntu" {',
+    "  most_recent = true",
+    "}",
+    "",
+    'module "vpc" {',
+    '  source = "terraform-aws-modules/vpc/aws"',
+    "}",
+  }
+  local resources = with_scratch_buf({ lines = lines }, function(bufnr)
+    return ts.list_resources(bufnr)
+  end)
+
+  expect.equality(#resources, 3)
+  expect.equality(resources[1].kind, "resource")
+  expect.equality(resources[1].type, "aws_instance")
+  expect.equality(resources[1].name, "web")
+  expect.equality(resources[1].line, 1)
+  expect.equality(resources[2].kind, "data")
+  expect.equality(resources[2].type, "aws_ami")
+  expect.equality(resources[2].name, "ubuntu")
+  expect.equality(resources[2].line, 5)
+  expect.equality(resources[3].kind, "module")
+  expect.equality(resources[3].name, "vpc")
+  expect.equality(resources[3].line, 9)
+end
+
+T["ts.list_resources returns empty table when no resources found"] = function()
+  reset_state()
+  local ts = require("tf-docs.ts")
+  local lines = {
+    "# Just a comment",
+    'variable "foo" {}',
+  }
+  local resources = with_scratch_buf({ lines = lines }, function(bufnr)
+    return ts.list_resources(bufnr)
+  end)
+
+  expect.equality(#resources, 0)
+end
+
 T["integration: resolver.resolve() works end-to-end with root + ts.get_context"] = function()
   reset_state()
   local config = require("tf-docs.config")
@@ -442,6 +490,35 @@ T["integration: resolver.resolve() works end-to-end with root + ts.get_context"]
   expect.equality(trace.root, fixture_path("integration_project"))
   expect.equality(trace.provider_source, "hashicorp/google-beta")
   expect.equality(trace.provider_version, "4.80.0")
+end
+
+T["config validates ui_select_backend with valid values"] = function()
+  reset_state()
+  local config = require("tf-docs.config")
+
+  -- Test auto
+  local cfg = config.setup({ ui_select_backend = "auto" })
+  expect.equality(cfg.ui_select_backend, "auto")
+
+  -- Test builtin
+  cfg = config.setup({ ui_select_backend = "builtin" })
+  expect.equality(cfg.ui_select_backend, "builtin")
+end
+
+T["config falls back to default for invalid ui_select_backend"] = function()
+  reset_state()
+  local config = require("tf-docs.config")
+
+  local cfg = config.setup({ ui_select_backend = "invalid" })
+  expect.equality(cfg.ui_select_backend, "auto")
+end
+
+T["config uses default ui_select_backend when not specified"] = function()
+  reset_state()
+  local config = require("tf-docs.config")
+
+  local cfg = config.setup({})
+  expect.equality(cfg.ui_select_backend, "auto")
 end
 
 return T

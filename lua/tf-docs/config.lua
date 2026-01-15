@@ -8,6 +8,7 @@
 ---@field provider_overrides table<string, string>
 ---@field enable_module_docs boolean
 ---@field log_level string
+---@field ui_select_backend "auto"|"builtin"
 
 local M = {}
 
@@ -106,6 +107,18 @@ local function validate(cfg)
     cfg.enable_module_docs = default_config.enable_module_docs
   end
 
+  local valid_backends = { auto = true, builtin = true }
+  if not valid_backends[cfg.ui_select_backend] then
+    warn(
+      string.format(
+        "tf-docs.nvim: invalid ui_select_backend=%s (fallback to %s)",
+        tostring(cfg.ui_select_backend),
+        default_config.ui_select_backend
+      )
+    )
+    cfg.ui_select_backend = default_config.ui_select_backend
+  end
+
   return cfg
 end
 
@@ -119,6 +132,7 @@ default_config = {
   provider_overrides = {},
   enable_module_docs = true,
   log_level = "warn",
+  ui_select_backend = "auto",
 }
 
 ---@type TfDocsConfig
