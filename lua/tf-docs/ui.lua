@@ -23,6 +23,62 @@ local function close_peek()
   peek_buf = nil
 end
 
+---@param text string
+---@param width number
+---@return string
+local function pad_right(text, width)
+  local current = vim.api.nvim_strwidth(text)
+  if current >= width then
+    return text
+  end
+  return text .. string.rep(" ", width - current)
+end
+
+---@param lines string[]
+---@param opts { filetype?: string }|nil
+local function open_peek(lines, opts)
+  close_peek()
+  opts = opts or {}
+
+  local buf = vim.api.nvim_create_buf(false, true)
+  peek_buf = buf
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].filetype = opts.filetype or "tf-docs"
+  vim.bo[buf].buftype = "nofile"
+  vim.bo[buf].bufhidden = "wipe"
+  vim.bo[buf].swapfile = false
+  vim.bo[buf].modifiable = false
+
+  local width = 0
+  for _, line in ipairs(lines) do
+    width = math.max(width, vim.api.nvim_strwidth(line))
+  end
+
+  local height = #lines
+  local win_opts = {
+    relative = "cursor",
+    width = math.min(width + 2, math.floor(vim.o.columns * 0.8)),
+    height = math.min(height, math.floor(vim.o.lines * 0.5)),
+    row = 1,
+    col = 1,
+    style = "minimal",
+    border = "rounded",
+  }
+
+  local win = vim.api.nvim_open_win(buf, true, win_opts)
+  peek_win = win
+  vim.wo[win].wrap = false
+
+  vim.keymap.set("n", "q", close_peek, { buffer = buf, nowait = true, silent = true })
+  vim.keymap.set("n", "<Esc>", close_peek, { buffer = buf, nowait = true, silent = true })
+
+  vim.api.nvim_create_autocmd({ "BufLeave", "WinLeave" }, {
+    buffer = buf,
+    once = true,
+    callback = close_peek,
+  })
+end
+
 ---@param url string
 ---@return boolean
 function M.open(url)
@@ -57,7 +113,6 @@ end
 
 ---@param trace TfDocsTrace
 function M.peek(trace)
-  close_peek()
   local lines = {
     "tf-docs.nvim",
     "",
@@ -71,44 +126,78 @@ function M.peek(trace)
     string.format("Anchor: %s", trace.anchor or "(none)"),
     string.format("Reason: %s", trace.reason or "(none)"),
   }
+  open_peek(lines, { filetype = "tf-docs" })
+end
 
-  local buf = vim.api.nvim_create_buf(false, true)
-  peek_buf = buf
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  vim.bo[buf].filetype = "tf-docs"
-  vim.bo[buf].buftype = "nofile"
-  vim.bo[buf].bufhidden = "wipe"
-  vim.bo[buf].swapfile = false
-  vim.bo[buf].modifiable = false
-
-  local width = 0
-  for _, line in ipairs(lines) do
-    width = math.max(width, #line)
-  end
-
-  local height = #lines
-  local opts = {
-    relative = "cursor",
-    width = math.min(width + 2, math.floor(vim.o.columns * 0.8)),
-    height = math.min(height, math.floor(vim.o.lines * 0.5)),
-    row = 1,
-    col = 1,
-    style = "minimal",
-    border = "rounded",
+---@param versions table<string, string>
+---@param root string|nil
+---@param meta table<string, TfDocsLockfileMeta>|nil
+---@param has_lockfile boolean|nil
+---@return string[]
+function M._build_versions_lines(versions, root, meta, has_lockfile)
+  local lines = {
+    "tf-docs.nvim - Provider Versions",
+    "",
+    string.format("Root: %s", root or "(none)"),
   }
 
-  local win = vim.api.nvim_open_win(buf, true, opts)
-  peek_win = win
-  vim.wo[win].wrap = false
+  local lockfile_note = has_lockfile and ".terraform.lock.hcl" or ".terraform.lock.hcl (missing)"
+  table.insert(lines, string.format("Lockfile: %s", lockfile_note))
+  table.insert(lines, "")
 
-  vim.keymap.set("n", "q", close_peek, { buffer = buf, nowait = true, silent = true })
-  vim.keymap.set("n", "<Esc>", close_peek, { buffer = buf, nowait = true, silent = true })
+  local sources = {}
+  for source, _ in pairs(versions) do
+    sources[source] = true
+  end
+  for source, _ in pairs(meta or {}) do
+    sources[source] = true
+  end
 
-  vim.api.nvim_create_autocmd({ "BufLeave", "WinLeave" }, {
-    buffer = buf,
-    once = true,
-    callback = close_peek,
-  })
+  local sorted = {}
+  for source, _ in pairs(sources) do
+    table.insert(sorted, source)
+  end
+  table.sort(sorted, function(a, b)
+    return a < b
+  end)
+
+  local max_source_width = 0
+  for _, source in ipairs(sorted) do
+    max_source_width = math.max(max_source_width, vim.api.nvim_strwidth(source))
+  end
+
+  for _, source in ipairs(sorted) do
+    local item_meta = meta and meta[source] or nil
+    local version = versions[source]
+    local version_label
+    if item_meta and item_meta.version_missing then
+      version_label = "(missing)"
+    elseif item_meta and item_meta.version_multiple then
+      version_label = string.format("%s (multiple)", version or "(missing)")
+    else
+      version_label = version or "(missing)"
+    end
+
+    local line = string.format("%s  %s", pad_right(source, max_source_width), version_label)
+    table.insert(lines, line)
+  end
+
+  if #sorted == 0 then
+    table.insert(lines, "(no providers found)")
+  end
+
+  table.insert(lines, "")
+  table.insert(lines, "─── Keys: q/<Esc> to close ───")
+  return lines
+end
+
+---@param versions table<string, string>
+---@param root string|nil
+---@param meta table<string, TfDocsLockfileMeta>|nil
+---@param has_lockfile boolean|nil
+function M.show_versions(versions, root, meta, has_lockfile)
+  local lines = M._build_versions_lines(versions, root, meta, has_lockfile)
+  open_peek(lines, { filetype = "tf-docs" })
 end
 
 local function close_select()
@@ -195,7 +284,7 @@ function M.select(items, opts, on_choice)
   -- Calculate width and height
   local width = 0
   for _, line in ipairs(lines) do
-    width = math.max(width, vim.fn.strdisplaywidth(line))
+    width = math.max(width, vim.api.nvim_strwidth(line))
   end
 
   local height = math.min(#lines, vim.o.lines - 4)

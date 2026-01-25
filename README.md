@@ -136,6 +136,8 @@ Now place the cursor inside a Terraform block and press `gK` (or `K` if you opte
   Show a lightweight "peek" UI (resolved URL + trace) in a floating window.
 * `:TfDocList`
   List all resources/data sources/modules in the current buffer. Select one to open its documentation.
+* `:TfDocVersion`
+  Display resolved provider versions from `.terraform.lock.hcl` in a floating window.
 * `:TfDocClearCache`
   Clear internal caches (root/provider/lockfile resolution). Use this after changing `required_providers` or `.terraform.lock.hcl`.
 

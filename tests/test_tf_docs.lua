@@ -521,4 +521,58 @@ T["config uses default ui_select_backend when not specified"] = function()
   expect.equality(cfg.ui_select_backend, "auto")
 end
 
+T["ui versions view shows missing lockfile and empty providers"] = function()
+  reset_state()
+  local ui = require("tf-docs.ui")
+
+  local lines = ui._build_versions_lines({}, "/root", {}, false)
+  expect.equality(lines[1], "tf-docs.nvim - Provider Versions")
+  expect.equality(lines[3], "Root: /root")
+  expect.equality(lines[4], "Lockfile: .terraform.lock.hcl (missing)")
+  expect.equality(lines[6], "(no providers found)")
+end
+
+T["ui versions view sorts, aligns, and annotates providers"] = function()
+  reset_state()
+  local ui = require("tf-docs.ui")
+
+  local versions = {
+    ["hashicorp/zb\tfoo"] = "1.2.3",
+    ["hashicorp/aws"] = "5.0.0",
+  }
+  local meta = {
+    ["hashicorp/aws"] = { version_multiple = true },
+    ["hashicorp/google"] = { version_missing = true },
+  }
+
+  local lines = ui._build_versions_lines(versions, "/root", meta, true)
+  local provider_lines = {}
+  for _, line in ipairs(lines) do
+    if line:match("^hashicorp/") then
+      table.insert(provider_lines, line)
+    end
+  end
+
+  expect.equality(#provider_lines, 3)
+
+  local expected_sources = { "hashicorp/aws", "hashicorp/google", "hashicorp/zb\tfoo" }
+  for i, line in ipairs(provider_lines) do
+    local source_part = line:match("^(.*)  [^ ].*$")
+    expect.equality(vim.trim(source_part), expected_sources[i])
+  end
+
+  local max_width = 0
+  for _, source in ipairs(expected_sources) do
+    max_width = math.max(max_width, vim.api.nvim_strwidth(source))
+  end
+  for _, line in ipairs(provider_lines) do
+    local source_part = line:match("^(.*)  [^ ].*$")
+    expect.equality(vim.api.nvim_strwidth(source_part), max_width)
+  end
+
+  expect.equality(provider_lines[1]:match("^.*  ([^ ].+)$"), "5.0.0 (multiple)")
+  expect.equality(provider_lines[2]:match("^.*  ([^ ].+)$"), "(missing)")
+  expect.equality(provider_lines[3]:match("^.*  ([^ ].+)$"), "1.2.3")
+end
+
 return T
