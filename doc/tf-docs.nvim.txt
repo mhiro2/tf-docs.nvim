@@ -145,6 +145,12 @@ To route tf-docs -> LSP hover when docs aren't available:
         Clear internal caches (root/provider/lockfile resolution). Use this
         after changing required_providers or .terraform.lock.hcl.
 
+:TfDocVersion                                             *:TfDocVersion*
+        Display resolved provider versions from .terraform.lock.hcl in a
+        floating window. Shows the root directory and a list of providers
+        with their resolved versions.
+        Press q or <Esc> to close the window.
+
 ==============================================================================
 6. CONFIGURATION                                        *tf-docs.nvim-config*
 

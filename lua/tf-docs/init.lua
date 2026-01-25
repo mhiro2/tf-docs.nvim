@@ -76,6 +76,24 @@ local function create_commands()
     ui.peek(trace)
   end, {})
 
+  vim.api.nvim_create_user_command("TfDocVersion", function()
+    local cfg = config.get()
+    local root = require("tf-docs.root").get_root(0, cfg)
+
+    if not root then
+      log.log(cfg, "warn", "Unable to find Terraform root directory")
+      return
+    end
+
+    local versions = lockfile.resolve(root)
+    local meta = lockfile.get_meta(root)
+    local lockfile_path = vim.fs.joinpath(root, ".terraform.lock.hcl")
+    local stat = vim.uv.fs_stat(lockfile_path)
+    local has_lockfile = stat ~= nil and stat.type == "file"
+
+    ui.show_versions(versions, root, meta, has_lockfile)
+  end, {})
+
   vim.api.nvim_create_user_command("TfDocClearCache", function()
     cache.clear()
     lockfile.clear_meta()
