@@ -20,8 +20,9 @@ local function anchor_from_line(line)
 end
 
 ---@param bufnr number
+---@param cursor_pos integer[]|nil
 ---@return TfDocsContext|nil
-local function get_context_treesitter(bufnr)
+local function get_context_treesitter(bufnr, cursor_pos)
   if not vim.treesitter or not vim.treesitter.get_parser then
     return nil
   end
@@ -58,7 +59,7 @@ local function get_context_treesitter(bufnr)
     return nil
   end
 
-  local cursor = vim.api.nvim_win_get_cursor(0)
+  local cursor = cursor_pos or vim.api.nvim_win_get_cursor(0)
   local row0 = cursor[1] - 1
   local col0 = cursor[2]
 
@@ -169,23 +170,28 @@ local function get_context_treesitter(bufnr)
 end
 
 ---@param bufnr number
+---@param cursor_pos integer[]|nil
 ---@return TfDocsContext|nil
-function M.get_context(bufnr)
-  local ctx = get_context_treesitter(bufnr)
+function M.get_context(bufnr, cursor_pos)
+  local cursor = cursor_pos or vim.api.nvim_win_get_cursor(0)
+  local row = cursor[1]
+  if row < 1 then
+    return nil
+  end
+
+  local ctx = get_context_treesitter(bufnr, cursor)
   if ctx then
     return ctx
   end
 
   -- Fallback: no parser available or TS failure. Keep it best-effort and robust.
-  local cursor = vim.api.nvim_win_get_cursor(0)
-  local row = cursor[1]
-  -- Only read up to the cursor line for upward scanning.
-  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, row, false)
-  if #lines == 0 then
+  local line_count = vim.api.nvim_buf_line_count(bufnr)
+  if line_count == 0 or row > line_count then
     return nil
   end
 
-  local current_line = lines[row] or ""
+  local current_line = vim.api.nvim_buf_get_lines(bufnr, row - 1, row, false)[1] or ""
+
   local anchor = anchor_from_line(current_line)
   if anchor == "resource" or anchor == "data" or anchor == "module" then
     anchor = nil
@@ -213,8 +219,8 @@ function M.get_context(bufnr)
     -- Read a bounded range starting at module header, then scan until braces close.
     local max_scan = 500
     local start0 = start_line - 1
-    local line_count = vim.api.nvim_buf_line_count(bufnr)
-    local end0 = math.min(start0 + max_scan, line_count)
+    local total_lines = vim.api.nvim_buf_line_count(bufnr)
+    local end0 = math.min(start0 + max_scan, total_lines)
     local block_lines = vim.api.nvim_buf_get_lines(bufnr, start0, end0, false)
     for i = 1, #block_lines do
       local line = block_lines[i]
@@ -274,34 +280,59 @@ function M.get_context(bufnr)
   local function find_provider_hint(start_line)
     local max_scan = 500
     local start0 = start_line - 1
-    local line_count = vim.api.nvim_buf_line_count(bufnr)
-    local end0 = math.min(start0 + max_scan, line_count)
+    local total_lines = vim.api.nvim_buf_line_count(bufnr)
+    local end0 = math.min(start0 + max_scan, total_lines)
     local block_lines = vim.api.nvim_buf_get_lines(bufnr, start0, end0, false)
     return provider_hint_from_block_text(table.concat(block_lines, "\n"))
   end
 
-  for i = row, 1, -1 do
-    local line = lines[i]
-    local kind, type_name = line:match('^%s*(resource)%s+"([^"]+)"%s+"[^"]+"')
-    if kind and type_name then
-      local provider_hint = find_provider_hint(i)
-      return { kind = kind, type = type_name, provider_hint = provider_hint, anchor_candidate = anchor }
-    end
+  local function find_header_upward()
+    local chunk_size = 256
+    local chunk_end = row
+    while chunk_end >= 1 do
+      local chunk_start = math.max(1, chunk_end - chunk_size + 1)
+      local lines = vim.api.nvim_buf_get_lines(bufnr, chunk_start - 1, chunk_end, false)
+      for idx = #lines, 1, -1 do
+        local line_number = chunk_start + idx - 1
+        local line = lines[idx]
 
-    kind, type_name = line:match('^%s*(data)%s+"([^"]+)"%s+"[^"]+"')
-    if kind and type_name then
-      local provider_hint = find_provider_hint(i)
-      return { kind = kind, type = type_name, provider_hint = provider_hint, anchor_candidate = anchor }
-    end
+        local kind, type_name = line:match('^%s*(resource)%s+"([^"]+)"%s+"[^"]+"')
+        if kind and type_name then
+          return { kind = kind, type = type_name, line = line_number }
+        end
 
-    local module_kind = line:match('^%s*(module)%s+"[^"]+"')
-    if module_kind then
-      local source = find_module_source(i)
-      return { kind = "module", type = nil, module_source = source, anchor_candidate = anchor }
+        kind, type_name = line:match('^%s*(data)%s+"([^"]+)"%s+"[^"]+"')
+        if kind and type_name then
+          return { kind = kind, type = type_name, line = line_number }
+        end
+
+        local module_kind = line:match('^%s*(module)%s+"[^"]+"')
+        if module_kind then
+          return { kind = "module", type = nil, line = line_number }
+        end
+      end
+      chunk_end = chunk_start - 1
     end
+    return nil
   end
 
-  return nil
+  local header = find_header_upward()
+  if not header then
+    return nil
+  end
+
+  if header.kind == "module" then
+    local source = find_module_source(header.line)
+    return { kind = "module", type = nil, module_source = source, anchor_candidate = anchor }
+  end
+
+  local provider_hint = find_provider_hint(header.line)
+  return {
+    kind = header.kind,
+    type = header.type,
+    provider_hint = provider_hint,
+    anchor_candidate = anchor,
+  }
 end
 
 ---@class TfDocsResource
