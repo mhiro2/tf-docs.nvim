@@ -44,13 +44,17 @@ local function get_context_treesitter(bufnr)
     return nil
   end
 
-  local trees = parser:parse()
-  if not trees or not trees[1] then
+  local ok_trees, trees = pcall(function()
+    return parser:parse()
+  end)
+  if not ok_trees or not trees or not trees[1] then
     return nil
   end
 
-  local root = trees[1]:root()
-  if not root then
+  local ok_root, root = pcall(function()
+    return trees[1]:root()
+  end)
+  if not ok_root or not root then
     return nil
   end
 
@@ -64,8 +68,10 @@ local function get_context_treesitter(bufnr)
     anchor = nil
   end
 
-  local node = root:named_descendant_for_range(row0, col0, row0, col0)
-  if not node then
+  local ok_node, node = pcall(function()
+    return root:named_descendant_for_range(row0, col0, row0, col0)
+  end)
+  if not ok_node or not node then
     return nil
   end
 
@@ -112,7 +118,12 @@ local function get_context_treesitter(bufnr)
   end
 
   while node do
-    local sr, _, er, _ = node:range()
+    local ok_range, sr, _, er, _ = pcall(function()
+      return node:range()
+    end)
+    if not ok_range then
+      return nil
+    end
     local line = header_line_at(sr)
 
     local type_name = line:match('^%s*resource%s+"([^"]+)"%s+"[^"]+"')
@@ -145,7 +156,13 @@ local function get_context_treesitter(bufnr)
       return { kind = "module", type = nil, module_source = source, anchor_candidate = anchor }
     end
 
-    node = node:parent()
+    local ok_parent, parent = pcall(function()
+      return node:parent()
+    end)
+    if not ok_parent then
+      return nil
+    end
+    node = parent
   end
 
   return nil

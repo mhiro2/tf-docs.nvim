@@ -9,7 +9,12 @@ local ts = require("tf-docs.ts")
 local M = {}
 
 local commands_created = false
-local autocmds_created = false
+local autocmd_group = "tf-docs.nvim"
+
+local function clear_runtime_cache()
+  cache.clear()
+  lockfile.clear_meta()
+end
 
 local function create_commands()
   if commands_created then
@@ -148,17 +153,20 @@ local function create_commands()
 end
 
 local function create_autocmds()
-  if autocmds_created then
-    return
-  end
-
   local cfg = config.get()
-  local group = vim.api.nvim_create_augroup("tf-docs.nvim", { clear = true })
-  vim.api.nvim_create_autocmd("BufWipeout", {
+  local group = vim.api.nvim_create_augroup(autocmd_group, { clear = true })
+  vim.api.nvim_create_autocmd({ "BufWipeout", "BufFilePost" }, {
     group = group,
     callback = function(args)
-      cache.clear_buf(args.buf)
+      if args and type(args.buf) == "number" and args.buf > 0 then
+        cache.clear_buf(args.buf)
+      end
     end,
+  })
+
+  vim.api.nvim_create_autocmd("DirChanged", {
+    group = group,
+    callback = clear_runtime_cache,
   })
 
   local invalidate_patterns = vim.deepcopy(cfg.required_providers_files)
@@ -166,18 +174,14 @@ local function create_autocmds()
   vim.api.nvim_create_autocmd("BufWritePost", {
     group = group,
     pattern = invalidate_patterns,
-    callback = function()
-      cache.clear()
-      lockfile.clear_meta()
-    end,
+    callback = clear_runtime_cache,
   })
-
-  autocmds_created = true
 end
 
 ---@param opts TfDocsConfig|nil
 function M.setup(opts)
   config.setup(opts)
+  clear_runtime_cache()
   create_commands()
   create_autocmds()
 end
