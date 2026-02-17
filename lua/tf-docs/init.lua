@@ -21,9 +21,12 @@ local function create_commands()
     return
   end
 
-  local function resolve_safe(bufnr)
+  ---@param bufnr number
+  ---@param opts { context?: TfDocsContext, root?: string }|nil
+  ---@return string|nil, TfDocsTrace
+  local function resolve_safe(bufnr, opts)
     local cfg = config.get()
-    local ok, url_or_err, trace = pcall(resolver.resolve, bufnr)
+    local ok, url_or_err, trace = pcall(resolver.resolve, bufnr, opts)
     if not ok then
       log.log(cfg, "error", string.format("tf-docs.nvim: unexpected error: %s", tostring(url_or_err)))
       return nil, { reason = "exception", error = tostring(url_or_err) }
@@ -134,11 +137,12 @@ local function create_commands()
       end
 
       local r = selected.resource
-      local original_cursor = vim.api.nvim_win_get_cursor(0)
-
-      vim.api.nvim_win_set_cursor(0, { r.line, 0 })
-      local url, trace = resolve_safe(0)
-      vim.api.nvim_win_set_cursor(0, original_cursor)
+      local context = ts.get_context(0, { r.line, 0 })
+      if not context then
+        notify_unresolved({ reason = "list-context-unresolved" })
+        return
+      end
+      local url, trace = resolve_safe(0, { context = context })
 
       if not url then
         notify_unresolved(trace)

@@ -56,6 +56,27 @@ local function with_treesitter(mock, fn)
   return a, b, c, d
 end
 
+---@param patches { target: table, key: string, value: any }[]
+local function with_patches(patches, fn)
+  local originals = {}
+  for i, patch in ipairs(patches) do
+    originals[i] = patch.target[patch.key]
+    patch.target[patch.key] = patch.value
+  end
+
+  local ok, a, b, c, d = pcall(fn)
+
+  for i = #patches, 1, -1 do
+    local patch = patches[i]
+    patch.target[patch.key] = originals[i]
+  end
+
+  if not ok then
+    error(a)
+  end
+  return a, b, c, d
+end
+
 local function reset_state()
   require("tf-docs.cache").clear()
 end
@@ -353,6 +374,27 @@ T["ts.get_context fallback works with large files"] = function()
   expect.equality(ctx.anchor_candidate, "tags")
 end
 
+T["ts.get_context supports explicit cursor argument"] = function()
+  reset_state()
+  local ts = require("tf-docs.ts")
+  local lines = {
+    'resource "aws_instance" "x" {',
+    '  ami = "ami-123"',
+    "  tags = {",
+    '    Name = "x"',
+    "  }",
+    "}",
+  }
+
+  local ctx = with_scratch_buf({ lines = lines, cursor = { 1, 0 } }, function(bufnr)
+    return ts.get_context(bufnr, { 3, 2 })
+  end)
+
+  expect.equality(ctx.kind, "resource")
+  expect.equality(ctx.type, "aws_instance")
+  expect.equality(ctx.anchor_candidate, "tags")
+end
+
 T["ts.get_context falls back when treesitter parser raises"] = function()
   reset_state()
   local ts = require("tf-docs.ts")
@@ -410,6 +452,143 @@ T["setup rebuilds BufWritePost patterns on reconfigure"] = function()
   expect.equality(second_patterns["versions.tf"], nil)
   expect.equality(second_patterns["providers.tf"], true)
   expect.equality(second_patterns[".terraform.lock.hcl"], true)
+end
+
+T["TfDocList resolves selected item without moving cursor"] = function()
+  reset_state()
+  local plugin = require("tf-docs")
+  local resolver = require("tf-docs.resolver")
+  local ts = require("tf-docs.ts")
+  local ui = require("tf-docs.ui")
+
+  plugin.setup()
+
+  with_scratch_buf({
+    lines = {
+      'resource "aws_instance" "x" {',
+      '  ami = "ami-123"',
+      "}",
+      'resource "aws_ami" "y" {',
+      "}",
+    },
+    cursor = { 1, 0 },
+  }, function()
+    local cursor_before = vim.api.nvim_win_get_cursor(0)
+    local opened_url
+    local resolve_calls = 0
+
+    with_patches({
+      {
+        target = ts,
+        key = "list_resources",
+        value = function()
+          return {
+            { kind = "resource", type = "aws_ami", name = "y", line = 4 },
+          }
+        end,
+      },
+      {
+        target = ts,
+        key = "get_context",
+        value = function(_, cursor_pos)
+          expect.equality(cursor_pos[1], 4)
+          return { kind = "resource", type = "aws_ami", anchor_candidate = nil }
+        end,
+      },
+      {
+        target = resolver,
+        key = "resolve",
+        value = function(_, opts)
+          resolve_calls = resolve_calls + 1
+          expect.equality(opts.context.kind, "resource")
+          expect.equality(opts.context.type, "aws_ami")
+          return "https://example.com/docs", { url = "https://example.com/docs" }
+        end,
+      },
+      {
+        target = ui,
+        key = "select",
+        value = function(items, _, on_choice)
+          on_choice(items[1])
+        end,
+      },
+      {
+        target = ui,
+        key = "open",
+        value = function(url)
+          opened_url = url
+          return true
+        end,
+      },
+    }, function()
+      vim.api.nvim_cmd({ cmd = "TfDocList" }, {})
+    end)
+
+    expect.equality(resolve_calls, 1)
+    expect.equality(opened_url, "https://example.com/docs")
+    expect.equality(vim.api.nvim_win_get_cursor(0), cursor_before)
+  end)
+end
+
+T["TfDocList does not resolve when selection is cancelled"] = function()
+  reset_state()
+  local plugin = require("tf-docs")
+  local resolver = require("tf-docs.resolver")
+  local ts = require("tf-docs.ts")
+  local ui = require("tf-docs.ui")
+
+  plugin.setup()
+
+  with_scratch_buf({
+    lines = {
+      'resource "aws_instance" "x" {',
+      "}",
+    },
+    cursor = { 1, 0 },
+  }, function()
+    local resolve_calls = 0
+    local open_calls = 0
+
+    with_patches({
+      {
+        target = ts,
+        key = "list_resources",
+        value = function()
+          return {
+            { kind = "resource", type = "aws_instance", name = "x", line = 1 },
+          }
+        end,
+      },
+      {
+        target = ui,
+        key = "select",
+        value = function(_, _, on_choice)
+          on_choice(nil)
+        end,
+      },
+      {
+        target = resolver,
+        key = "resolve",
+        value = function()
+          resolve_calls = resolve_calls + 1
+          return nil, { reason = "unexpected" }
+        end,
+      },
+      {
+        target = ui,
+        key = "open",
+        value = function()
+          open_calls = open_calls + 1
+          return true
+        end,
+      },
+    }, function()
+      vim.api.nvim_cmd({ cmd = "TfDocList" }, {})
+    end)
+
+    expect.equality(resolve_calls, 0)
+    expect.equality(open_calls, 0)
+  end)
 end
 
 T["root.get_root respects marker priority order"] = function()
@@ -479,6 +658,106 @@ T["BufFilePost invalidates cached root for renamed buffers"] = function()
     local refreshed = root.get_root(bufnr, config.get())
     expect.equality(refreshed, fixture_path("root_priority", "subdir"))
   end)
+end
+
+T["TfDocClearCache clears cache and lockfile meta"] = function()
+  reset_state()
+  local plugin = require("tf-docs")
+  local cache = require("tf-docs.cache")
+  local lockfile = require("tf-docs.lockfile")
+
+  plugin.setup()
+
+  local tmp_root = vim.fn.tempname()
+  vim.fn.mkdir(tmp_root, "p")
+  local lockfile_path = vim.fs.joinpath(tmp_root, ".terraform.lock.hcl")
+  vim.fn.writefile({
+    'provider "registry.terraform.io/hashicorp/aws" {',
+    "  hashes = []",
+    "}",
+  }, lockfile_path)
+
+  lockfile.resolve(tmp_root)
+  cache.set_required(tmp_root, { aws = "hashicorp/aws" })
+  cache.set_lockfile(tmp_root, { ["hashicorp/aws"] = "1.0.0" })
+  cache.set_root(999, tmp_root)
+
+  expect.equality(lockfile.get_meta(tmp_root)["hashicorp/aws"].version_missing, true)
+  expect.equality(cache.get_required(tmp_root).aws, "hashicorp/aws")
+  expect.equality(cache.get_lockfile(tmp_root)["hashicorp/aws"], "1.0.0")
+  expect.equality(cache.get_root(999), tmp_root)
+
+  vim.api.nvim_cmd({ cmd = "TfDocClearCache" }, {})
+
+  expect.equality(cache.get_required(tmp_root), nil)
+  expect.equality(cache.get_lockfile(tmp_root), nil)
+  expect.equality(cache.get_root(999), nil)
+  expect.equality(next(lockfile.get_meta(tmp_root)), nil)
+
+  vim.fn.delete(tmp_root, "rf")
+end
+
+T["TfDocVersion passes resolved values to UI"] = function()
+  reset_state()
+  local plugin = require("tf-docs")
+  local lockfile = require("tf-docs.lockfile")
+  local root = require("tf-docs.root")
+  local ui = require("tf-docs.ui")
+
+  plugin.setup()
+
+  local captured
+  with_patches({
+    {
+      target = root,
+      key = "get_root",
+      value = function()
+        return "/tmp/project"
+      end,
+    },
+    {
+      target = lockfile,
+      key = "resolve",
+      value = function(resolved_root)
+        expect.equality(resolved_root, "/tmp/project")
+        return { ["hashicorp/aws"] = "5.30.0" }
+      end,
+    },
+    {
+      target = lockfile,
+      key = "get_meta",
+      value = function(resolved_root)
+        expect.equality(resolved_root, "/tmp/project")
+        return { ["hashicorp/aws"] = {} }
+      end,
+    },
+    {
+      target = vim.uv,
+      key = "fs_stat",
+      value = function(path)
+        expect.equality(path, "/tmp/project/.terraform.lock.hcl")
+        return { type = "file" }
+      end,
+    },
+    {
+      target = ui,
+      key = "show_versions",
+      value = function(versions, resolved_root, meta, has_lockfile)
+        captured = {
+          versions = versions,
+          root = resolved_root,
+          meta = meta,
+          has_lockfile = has_lockfile,
+        }
+      end,
+    },
+  }, function()
+    vim.api.nvim_cmd({ cmd = "TfDocVersion" }, {})
+  end)
+
+  expect.equality(captured.root, "/tmp/project")
+  expect.equality(captured.versions["hashicorp/aws"], "5.30.0")
+  expect.equality(captured.has_lockfile, true)
 end
 
 T["required_providers.resolve merges multiple files (later overrides earlier)"] = function()
