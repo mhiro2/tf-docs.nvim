@@ -45,6 +45,17 @@ local function with_no_treesitter(fn)
   return a, b, c, d
 end
 
+local function with_treesitter(mock, fn)
+  local saved = vim.treesitter
+  vim.treesitter = mock
+  local ok, a, b, c, d = pcall(fn)
+  vim.treesitter = saved
+  if not ok then
+    error(a)
+  end
+  return a, b, c, d
+end
+
 local function reset_state()
   require("tf-docs.cache").clear()
 end
@@ -342,6 +353,65 @@ T["ts.get_context fallback works with large files"] = function()
   expect.equality(ctx.anchor_candidate, "tags")
 end
 
+T["ts.get_context falls back when treesitter parser raises"] = function()
+  reset_state()
+  local ts = require("tf-docs.ts")
+  local lines = {
+    'resource "aws_instance" "x" {',
+    "  tags = {",
+    '    Name = "x"',
+    "  }",
+    "}",
+  }
+
+  local ctx = with_treesitter({
+    get_parser = function()
+      return {
+        parse = function()
+          error("forced parser failure")
+        end,
+      }
+    end,
+  }, function()
+    return with_scratch_buf({ lines = lines, cursor = { 2, 2 } }, function(bufnr)
+      return ts.get_context(bufnr)
+    end)
+  end)
+
+  expect.equality(ctx.kind, "resource")
+  expect.equality(ctx.type, "aws_instance")
+  expect.equality(ctx.anchor_candidate, "tags")
+end
+
+T["setup rebuilds BufWritePost patterns on reconfigure"] = function()
+  reset_state()
+  local plugin = require("tf-docs")
+
+  plugin.setup({ required_providers_files = { "versions.tf" } })
+  local first_defs = vim.api.nvim_get_autocmds({ group = "tf-docs.nvim", event = "BufWritePost" })
+  local first_patterns = {}
+  for _, def in ipairs(first_defs) do
+    if type(def.pattern) == "string" and def.pattern ~= "" then
+      first_patterns[def.pattern] = true
+    end
+  end
+  expect.equality(first_patterns["versions.tf"], true)
+  expect.equality(first_patterns["providers.tf"], nil)
+  expect.equality(first_patterns[".terraform.lock.hcl"], true)
+
+  plugin.setup({ required_providers_files = { "providers.tf" } })
+  local second_defs = vim.api.nvim_get_autocmds({ group = "tf-docs.nvim", event = "BufWritePost" })
+  local second_patterns = {}
+  for _, def in ipairs(second_defs) do
+    if type(def.pattern) == "string" and def.pattern ~= "" then
+      second_patterns[def.pattern] = true
+    end
+  end
+  expect.equality(second_patterns["versions.tf"], nil)
+  expect.equality(second_patterns["providers.tf"], true)
+  expect.equality(second_patterns[".terraform.lock.hcl"], true)
+end
+
 T["root.get_root respects marker priority order"] = function()
   reset_state()
   local config = require("tf-docs.config")
@@ -368,6 +438,47 @@ T["root.get_root falls back to markers when no lockfile"] = function()
   end)
 
   expect.equality(got, fixture_path("root_marker"))
+end
+
+T["setup clears cached root values when root markers change"] = function()
+  reset_state()
+  local plugin = require("tf-docs")
+  local config = require("tf-docs.config")
+  local root = require("tf-docs.root")
+
+  local file = fixture_path("root_marker", "subdir", "foo.tf")
+  with_scratch_buf({ name = file, lines = { "" }, cursor = { 1, 0 } }, function(bufnr)
+    plugin.setup({ root_markers = { "terraform.tf" } })
+    local first = root.get_root(bufnr, config.get())
+    expect.equality(first, fixture_path("root_marker"))
+
+    plugin.setup({ root_markers = { ".terraform.lock.hcl" } })
+    local second = root.get_root(bufnr, config.get())
+    expect.equality(second, nil)
+  end)
+end
+
+T["BufFilePost invalidates cached root for renamed buffers"] = function()
+  reset_state()
+  local plugin = require("tf-docs")
+  local cache = require("tf-docs.cache")
+  local config = require("tf-docs.config")
+  local root = require("tf-docs.root")
+
+  plugin.setup({ root_markers = { "terraform.tf" } })
+
+  local file_a = fixture_path("root_marker", "subdir", "foo.tf")
+  local file_b = fixture_path("root_priority", "subdir", "main.tf")
+  with_scratch_buf({ name = file_a, lines = { "" }, cursor = { 1, 0 } }, function(bufnr)
+    local first = root.get_root(bufnr, config.get())
+    expect.equality(first, fixture_path("root_marker"))
+
+    vim.api.nvim_buf_set_name(bufnr, file_b)
+    expect.equality(cache.get_root(bufnr), nil)
+
+    local refreshed = root.get_root(bufnr, config.get())
+    expect.equality(refreshed, fixture_path("root_priority", "subdir"))
+  end)
 end
 
 T["required_providers.resolve merges multiple files (later overrides earlier)"] = function()
