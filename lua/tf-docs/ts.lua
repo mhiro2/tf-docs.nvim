@@ -8,6 +8,64 @@ local hcl = require("tf-docs.hcl")
 ---@field provider_hint string|nil
 ---@field anchor_candidate string|nil
 
+---@class TfDocsContextCacheEntry
+---@field row number
+---@field col number
+---@field changedtick number
+---@field created_ns integer
+---@field context TfDocsContext|nil
+
+local context_cache = {} ---@type table<number, TfDocsContextCacheEntry>
+local context_cache_ttl_ns = 300 * 1000 * 1000
+
+---@return integer
+local function now_ns()
+  if vim.uv and vim.uv.hrtime then
+    return vim.uv.hrtime()
+  end
+  return 0
+end
+
+---@param bufnr number
+---@param cursor integer[]
+---@return boolean, TfDocsContext|nil
+local function get_cached_context(bufnr, cursor)
+  local entry = context_cache[bufnr]
+  if not entry then
+    return false, nil
+  end
+
+  if entry.row ~= cursor[1] or entry.col ~= cursor[2] then
+    return false, nil
+  end
+
+  local changedtick = vim.api.nvim_buf_get_changedtick(bufnr)
+  if entry.changedtick ~= changedtick then
+    context_cache[bufnr] = nil
+    return false, nil
+  end
+
+  if now_ns() - entry.created_ns > context_cache_ttl_ns then
+    context_cache[bufnr] = nil
+    return false, nil
+  end
+
+  return true, entry.context
+end
+
+---@param bufnr number
+---@param cursor integer[]
+---@param context TfDocsContext|nil
+local function set_cached_context(bufnr, cursor, context)
+  context_cache[bufnr] = {
+    row = cursor[1],
+    col = cursor[2],
+    changedtick = vim.api.nvim_buf_get_changedtick(bufnr),
+    created_ns = now_ns(),
+    context = context,
+  }
+end
+
 ---@param line string
 ---@return string|nil
 local function anchor_from_line(line)
@@ -27,7 +85,7 @@ local function get_context_treesitter(bufnr, cursor_pos)
     return nil
   end
 
-  -- NOTE: `-u tests/minimal_init.lua` のような環境では parser が無いので pcall 必須
+  -- In minimal test environments (for example, -u tests/minimal_init.lua), parser may be unavailable.
   local ok_parser, parser = pcall(function()
     return vim.treesitter.get_parser(bufnr, "terraform")
   end)
@@ -179,14 +237,21 @@ function M.get_context(bufnr, cursor_pos)
     return nil
   end
 
+  local cache_hit, cached_context = get_cached_context(bufnr, cursor)
+  if cache_hit then
+    return cached_context
+  end
+
   local ctx = get_context_treesitter(bufnr, cursor)
   if ctx then
+    set_cached_context(bufnr, cursor, ctx)
     return ctx
   end
 
   -- Fallback: no parser available or TS failure. Keep it best-effort and robust.
   local line_count = vim.api.nvim_buf_line_count(bufnr)
   if line_count == 0 or row > line_count then
+    set_cached_context(bufnr, cursor, nil)
     return nil
   end
 
@@ -318,21 +383,30 @@ function M.get_context(bufnr, cursor_pos)
 
   local header = find_header_upward()
   if not header then
+    set_cached_context(bufnr, cursor, nil)
     return nil
   end
 
   if header.kind == "module" then
     local source = find_module_source(header.line)
-    return { kind = "module", type = nil, module_source = source, anchor_candidate = anchor }
+    local context = { kind = "module", type = nil, module_source = source, anchor_candidate = anchor }
+    set_cached_context(bufnr, cursor, context)
+    return context
   end
 
   local provider_hint = find_provider_hint(header.line)
-  return {
+  local context = {
     kind = header.kind,
     type = header.type,
     provider_hint = provider_hint,
     anchor_candidate = anchor,
   }
+  set_cached_context(bufnr, cursor, context)
+  return context
+end
+
+function M._clear_context_cache_for_test()
+  context_cache = {}
 end
 
 ---@class TfDocsResource
