@@ -16,6 +16,41 @@ local function clear_runtime_cache()
   lockfile.clear_meta()
 end
 
+---@type table<string, string>
+local unresolved_reason_messages = {
+  ["no-context"] = "No terraform resource/data/module under cursor",
+  ["module-disabled"] = "Module docs are disabled by configuration (enable_module_docs=false)",
+  ["module-source-unresolved"] = "Unable to resolve module source URL under cursor",
+  ["provider-unresolved"] = "Unable to infer provider from resource/data type under cursor",
+  ["url-unresolved"] = "Unable to build Terraform docs URL from current context",
+  ["list-context-unresolved"] = "Unable to resolve context for the selected terraform block",
+  ["lockfile-version-missing"] = "Provider version is missing in .terraform.lock.hcl",
+  ["lockfile-version-multiple"] = "Provider has multiple version entries in .terraform.lock.hcl",
+}
+
+---@param trace TfDocsTrace|{ reason?: string, error?: string }|nil
+---@return string
+local function format_unresolved_message(trace)
+  local reason = trace and trace.reason or nil
+  if reason == "exception" then
+    local detail = trace and trace.error
+    if detail and detail ~= "" then
+      return string.format("Failed to resolve Terraform docs due to an internal error: %s", detail)
+    end
+    return "Failed to resolve Terraform docs due to an internal error"
+  end
+
+  if reason and unresolved_reason_messages[reason] then
+    return unresolved_reason_messages[reason]
+  end
+
+  if reason and reason ~= "" then
+    return string.format("Failed to resolve Terraform docs (%s)", reason)
+  end
+
+  return "Failed to resolve Terraform docs"
+end
+
 local function create_commands()
   if commands_created then
     return
@@ -36,12 +71,7 @@ local function create_commands()
 
   local function notify_unresolved(trace)
     local cfg = config.get()
-    local reason = trace and trace.reason
-    if reason and reason ~= "" then
-      log.log(cfg, "warn", string.format("No terraform resource/data/module under cursor (%s)", reason))
-    else
-      log.log(cfg, "warn", "No terraform resource/data/module under cursor")
-    end
+    log.log(cfg, "warn", format_unresolved_message(trace))
   end
 
   vim.api.nvim_create_user_command("TfDocOpen", function()
