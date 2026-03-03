@@ -1,5 +1,6 @@
 local config = require("tf-docs.config")
 local log = require("tf-docs.log")
+local ui_backend = require("tf-docs.ui_backend")
 
 local M = {}
 
@@ -7,6 +8,8 @@ local peek_win ---@type number|nil
 local peek_buf ---@type number|nil
 local select_win ---@type number|nil
 local select_buf ---@type number|nil
+local min_window_width = 20
+local min_window_height = 3
 -- selene: allow(unused_variable)
 -- Used to keep reference to callback for cleanup
 local select_callback_ ---@type fun(item: any|nil)|nil
@@ -34,6 +37,20 @@ local function pad_right(text, width)
   return text .. string.rep(" ", width - current)
 end
 
+---@param preferred number
+---@param min_value number
+---@param max_value number
+---@return number
+local function clamp_window_size(preferred, min_value, max_value)
+  if max_value <= 0 then
+    return 1
+  end
+  local lower_bound = math.min(min_value, max_value)
+  return math.max(lower_bound, math.min(preferred, max_value))
+end
+
+M._clamp_window_size = clamp_window_size
+
 ---@param lines string[]
 ---@param opts { filetype?: string }|nil
 local function open_peek(lines, opts)
@@ -55,10 +72,12 @@ local function open_peek(lines, opts)
   end
 
   local height = #lines
+  local max_width = math.max(1, math.floor(vim.o.columns * 0.8))
+  local max_height = math.max(1, math.floor(vim.o.lines * 0.5))
   local win_opts = {
     relative = "cursor",
-    width = math.min(width + 2, math.floor(vim.o.columns * 0.8)),
-    height = math.min(height, math.floor(vim.o.lines * 0.5)),
+    width = clamp_window_size(width + 2, min_window_width, max_width),
+    height = clamp_window_size(height, min_window_height, max_height),
     row = 1,
     col = 1,
     style = "minimal",
@@ -88,9 +107,13 @@ function M.open(url)
     return false
   end
 
-  local ok, err = pcall(vim.ui.open, url)
+  local ok, open_result, open_err = pcall(vim.ui.open, url)
   if not ok then
-    log.log(cfg, "error", string.format("vim.ui.open failed: %s", tostring(err)))
+    log.log(cfg, "error", string.format("vim.ui.open failed: %s", tostring(open_result)))
+    return false
+  end
+  if open_result == nil then
+    log.log(cfg, "error", string.format("vim.ui.open failed: %s", tostring(open_err)))
     return false
   end
   return true
@@ -217,33 +240,11 @@ end
 ---@param on_choice fun(item: any|nil)
 function M.select(items, opts, on_choice)
   local cfg = config.get()
-  local ui_backend = cfg.ui_select_backend or "auto"
+  local backend = cfg.ui_select_backend or "auto"
 
-  -- Check for external UI plugins (only in auto mode)
-  if ui_backend == "auto" then
-    -- Check for telescope-ui-select
-    local ok_telescope, _ = pcall(require, "telescope")
-    if ok_telescope then
-      local ok_ext, _ = pcall(require, "telescope._extensions.ui-select")
-      if ok_ext then
-        vim.ui.select(items, opts, on_choice)
-        return
-      end
-    end
-
-    -- Check for fzf-lua
-    local ok_fzf, fzf = pcall(require, "fzf-lua")
-    if ok_fzf and fzf.registered_ui_select then
-      vim.ui.select(items, opts, on_choice)
-      return
-    end
-
-    -- Check for snacks.nvim
-    local ok_snacks, _ = pcall(require, "snacks.picker")
-    if ok_snacks then
-      vim.ui.select(items, opts, on_choice)
-      return
-    end
+  if backend == "auto" and ui_backend.detect_auto_backend() == "external" and vim.ui and vim.ui.select then
+    vim.ui.select(items, opts, on_choice)
+    return
   end
 
   -- Built-in simple UI (or when ui_backend == "builtin")
@@ -287,8 +288,10 @@ function M.select(items, opts, on_choice)
     width = math.max(width, vim.api.nvim_strwidth(line))
   end
 
-  local height = math.min(#lines, vim.o.lines - 4)
-  width = math.min(width + 4, vim.o.columns - 8)
+  local max_height = math.max(1, vim.o.lines - 2)
+  local max_width = math.max(1, vim.o.columns - 2)
+  local height = clamp_window_size(#lines, min_window_height, max_height)
+  width = clamp_window_size(width + 4, min_window_width, max_width)
 
   local win_opts = {
     relative = "cursor",
