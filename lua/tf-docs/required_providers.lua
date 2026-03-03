@@ -4,6 +4,12 @@ local utils = require("tf-docs.utils")
 
 local M = {}
 
+---@param source string
+---@return string
+local function normalize_source(source)
+  return source:gsub("^registry%.terraform%.io/", "")
+end
+
 ---@param text string
 ---@return table<string, string>
 function M.parse_text(text)
@@ -46,7 +52,7 @@ function M.parse_text(text)
             if eq and eq.kind == "symbol" and eq.value == "=" then
               local rhs = peek(2)
               if rhs and rhs.kind == "string" then
-                result[alias] = rhs.value
+                result[alias] = normalize_source(rhs.value)
                 i = i + 3
               elseif rhs and rhs.kind == "symbol" and rhs.value == "{" then
                 -- Parse object, extract source at object-depth==1
@@ -64,7 +70,7 @@ function M.parse_text(text)
                     local eq2 = peek(1)
                     local val = peek(2)
                     if eq2 and eq2.kind == "symbol" and eq2.value == "=" and val and val.kind == "string" then
-                      result[alias] = val.value
+                      result[alias] = normalize_source(val.value)
                       i = i + 3
                     else
                       i = i + 1
