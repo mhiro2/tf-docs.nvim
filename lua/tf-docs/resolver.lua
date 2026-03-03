@@ -18,8 +18,10 @@ local M = {}
 ---@field anchor string|nil
 ---@field url string|nil
 ---@field reason string|nil
+---@field error string|nil
 
----@param type_name string
+---@param type_name string|nil
+---@param provider_hint string|nil
 ---@param overrides table<string, string>
 ---@return string|nil
 local function infer_provider(type_name, provider_hint, overrides)
