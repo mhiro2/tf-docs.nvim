@@ -103,7 +103,7 @@ end
 function M.open(url)
   local cfg = config.get()
   if not vim.ui or not vim.ui.open then
-    log.log(cfg, "error", "vim.ui.open is unavailable (requires Neovim 0.10+)")
+    log.log(cfg, "error", "vim.ui.open is unavailable (available since Neovim 0.10.0)")
     return false
   end
 

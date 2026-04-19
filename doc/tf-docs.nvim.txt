@@ -41,9 +41,10 @@ Features:
 ==============================================================================
 2. REQUIREMENTS                                    *tf-docs.nvim-requirements*
 
-- Neovim 0.10+
-- nvim-treesitter with terraform/hcl parser(s)
-  - Install parsers via :TSInstall terraform (and optionally :TSInstall hcl)
+- Neovim 0.12+
+- Treesitter terraform/hcl parser(s) are optional
+  - If available, tf-docs uses Treesitter for more accurate context detection
+  - Otherwise it falls back to built-in line-based parsing
 
 No external commands are required for the default workflow.
 
@@ -54,7 +55,6 @@ Basic setup with lazy.nvim:
 >lua
   {
     "mhiro2/tf-docs.nvim",
-    dependencies = { "nvim-treesitter/nvim-treesitter" },
     ft = { "terraform", "hcl" },
     config = function()
       require("tf-docs").setup()
@@ -68,12 +68,8 @@ Basic setup with lazy.nvim:
   }
 <
 
-If you manage Treesitter parsers via ensure_installed:
->lua
-  require("nvim-treesitter.configs").setup({
-    ensure_installed = { "hcl", "terraform" },
-  })
-<
+If you want optional Treesitter-based context detection, ensure a `terraform`
+or `hcl` parser is available on your `runtimepath`.
 
 ==============================================================================
 4. LSP INTEGRATION                                      *tf-docs.nvim-lsp*
@@ -324,9 +320,8 @@ limited by allowlist.
 "No terraform resource/data/module under cursor"
   - Ensure your buffer filetype is `terraform` or `hcl`:
     :set filetype?
-  - Ensure `nvim-treesitter` parser is installed:
-    :TSInstall terraform
-    :TSInstall hcl  (optional)
+  - If detection is inaccurate in complex files, ensure a `terraform` or
+    `hcl` Treesitter parser is available on your `runtimepath`
 
 "Wrong provider namespace or version"
   - Check :TfDocDebug output for details
@@ -344,7 +339,7 @@ limited by allowlist.
   You can also clear caches manually with: :TfDocClearCache
 
 "Open URL failures"
-  - This plugin uses vim.ui.open() (Neovim 0.10+)
+  - This plugin uses vim.ui.open() (available since Neovim 0.10.0)
   - If vim.ui.open() fails, tf-docs logs the error via vim.notify
     (see :messages)
   - If your system cannot open URLs, verify your Neovim build and
@@ -354,7 +349,7 @@ Health check:
 Use :checkhealth tf-docs to verify your environment:
   - Neovim version
   - vim.ui.open availability
-  - Treesitter parser availability
+  - Optional Treesitter parser availability
 
 ==============================================================================
 10. FAQ                                                     *tf-docs.nvim-faq*

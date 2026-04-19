@@ -47,11 +47,10 @@ This is designed to eliminate repeated Google searches and reduce context switch
 
 ## ✅ Requirements
 
-- Neovim **0.10+**
-- `nvim-treesitter` with Terraform/HCL parser(s)
-  - Most users should install the `terraform` parser
-  - Some environments also benefit from the `hcl` parser
-  - Install parsers via `:TSInstall terraform` (and optionally `:TSInstall hcl`)
+- Neovim **0.12+**
+- Terraform/HCL Treesitter parser(s) are optional
+  - If available, tf-docs uses Treesitter for more accurate cursor context detection
+  - Without them, tf-docs falls back to built-in line-based parsing
 
 No external commands are required for the default workflow.
 
@@ -62,7 +61,6 @@ Using lazy.nvim:
 ```lua
 {
   "mhiro2/tf-docs.nvim",
-  dependencies = { "nvim-treesitter/nvim-treesitter" },
   ft = { "terraform", "hcl" },
   config = function()
     require("tf-docs").setup()
@@ -114,13 +112,7 @@ Using lazy.nvim:
 }
 ```
 
-If you manage Treesitter parsers via `ensure_installed`, you can also do:
-
-```lua
-require("nvim-treesitter.configs").setup({
-  ensure_installed = { "hcl", "terraform" },
-})
-```
+If you want the optional Treesitter-based context detection, make sure a `terraform` or `hcl` parser is available on your `runtimepath`. With Neovim 0.12 this can be provided by any parser manager or by manually placing `parser/terraform.*` or `parser/hcl.*` on the `runtimepath`.
 
 Now place the cursor inside a Terraform block and press `gK` (or `K` if you opted into the routing mapping above).
 
@@ -291,10 +283,7 @@ Anchor behavior is not guaranteed across all providers and is intentionally limi
 * Ensure your buffer filetype is `terraform` or `hcl`:
 
   * `:set filetype?`
-* Ensure `nvim-treesitter` parser is installed:
-
-  * `:TSInstall terraform`
-  * (optional) `:TSInstall hcl`
+* If detection is inaccurate in complex files, ensure a `terraform` or `hcl` Treesitter parser is available on your `runtimepath`
 
 ### Wrong provider namespace or version
 
@@ -317,11 +306,11 @@ You can also clear caches manually with `:TfDocClearCache`.
 
 ### Health check
 
-Use `:checkhealth tf-docs` to verify your environment (Neovim version, `vim.ui.open`, Treesitter parser availability).
+Use `:checkhealth tf-docs` to verify your environment (Neovim version, `vim.ui.open`, optional Treesitter parser availability).
 
 ### Linux/macOS/Windows open behavior
 
-* This plugin uses `vim.ui.open()` (Neovim 0.10+).
+* This plugin uses `vim.ui.open()` (available since Neovim 0.10.0).
 * If `vim.ui.open()` fails, tf-docs logs the error via `vim.notify` (see `:messages`).
 * If your system cannot open URLs, verify your Neovim build and OS integration.
 

@@ -1,13 +1,34 @@
 local M = {}
 
+---@return boolean
+local function has_min_nvim_version()
+  return vim.version.ge(vim.version(), { 0, 12, 0 })
+end
+
+---@return boolean
+local function has_treesitter_parser()
+  if not vim.treesitter or not vim.treesitter.language or not vim.treesitter.language.add then
+    return false
+  end
+
+  for _, lang in ipairs({ "terraform", "hcl" }) do
+    local ok, loaded = pcall(vim.treesitter.language.add, lang)
+    if ok and loaded then
+      return true
+    end
+  end
+
+  return false
+end
+
 function M.check()
   local health = vim.health or require("health")
   health.start("tf-docs")
 
-  if vim.fn.has("nvim-0.10") == 1 then
-    health.ok("Neovim 0.10+ detected")
+  if has_min_nvim_version() then
+    health.ok("Neovim 0.12+ detected")
   else
-    health.error("Neovim 0.10+ required")
+    health.error("Neovim 0.12+ required")
   end
 
   if vim.ui and vim.ui.open then
@@ -16,28 +37,10 @@ function M.check()
     health.error("vim.ui.open is unavailable")
   end
 
-  local function has_ts_parser(lang)
-    local patterns = {
-      string.format("parser/%s.so", lang),
-      string.format("parser/%s.dylib", lang),
-      string.format("parser/%s.dll", lang),
-      string.format("parser/%s.wasm", lang),
-    }
-    for _, p in ipairs(patterns) do
-      local found = vim.api.nvim_get_runtime_file(p, true)
-      if found and found[1] then
-        return true
-      end
-    end
-    return false
-  end
-
-  local has_parser = has_ts_parser("terraform") or has_ts_parser("hcl")
-
-  if has_parser then
-    health.ok("treesitter parser available (terraform/hcl)")
+  if has_treesitter_parser() then
+    health.ok("treesitter parser available (terraform/hcl, optional)")
   else
-    health.warn("treesitter parser not detected (terraform/hcl)")
+    health.warn("treesitter parser not detected; tf-docs will use line-based fallback parsing")
   end
 end
 
