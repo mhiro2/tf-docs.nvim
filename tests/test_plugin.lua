@@ -419,6 +419,133 @@ T["TfDocVersion passes resolved values to UI"] = function()
   expect.equality(captured.has_lockfile, true)
 end
 
+T["public API open() opens resolved URL"] = function()
+  H.reset_state()
+  local plugin = require("tf-docs")
+  local resolver = require("tf-docs.resolver")
+  local ui = require("tf-docs.ui")
+
+  plugin.setup()
+
+  local opened_url
+  H.with_patches({
+    {
+      target = resolver,
+      key = "resolve",
+      value = function()
+        return "https://example.com/api-open", { url = "https://example.com/api-open" }
+      end,
+    },
+    {
+      target = ui,
+      key = "open",
+      value = function(url)
+        opened_url = url
+        return true
+      end,
+    },
+  }, function()
+    plugin.open()
+  end)
+
+  expect.equality(opened_url, "https://example.com/api-open")
+end
+
+T["public API copy_url() copies resolved URL"] = function()
+  H.reset_state()
+  local plugin = require("tf-docs")
+  local resolver = require("tf-docs.resolver")
+  local ui = require("tf-docs.ui")
+
+  plugin.setup()
+
+  local copied_url
+  H.with_patches({
+    {
+      target = resolver,
+      key = "resolve",
+      value = function()
+        return "https://example.com/api-copy", { url = "https://example.com/api-copy" }
+      end,
+    },
+    {
+      target = ui,
+      key = "copy",
+      value = function(url)
+        copied_url = url
+      end,
+    },
+  }, function()
+    plugin.copy_url()
+  end)
+
+  expect.equality(copied_url, "https://example.com/api-copy")
+end
+
+T["public API resolve() returns url and trace without opening or notifying"] = function()
+  H.reset_state()
+  local plugin = require("tf-docs")
+  local resolver = require("tf-docs.resolver")
+  local ui = require("tf-docs.ui")
+  local log = require("tf-docs.log")
+
+  plugin.setup()
+
+  local open_calls = 0
+  local log_calls = 0
+  local url, trace
+  H.with_patches({
+    {
+      target = resolver,
+      key = "resolve",
+      value = function()
+        return "https://example.com/api-resolve", { url = "https://example.com/api-resolve", kind = "resource" }
+      end,
+    },
+    {
+      target = ui,
+      key = "open",
+      value = function()
+        open_calls = open_calls + 1
+        return true
+      end,
+    },
+    {
+      target = log,
+      key = "log",
+      value = function()
+        log_calls = log_calls + 1
+      end,
+    },
+  }, function()
+    url, trace = plugin.resolve()
+  end)
+
+  expect.equality(url, "https://example.com/api-resolve")
+  expect.equality(trace.kind, "resource")
+  expect.equality(open_calls, 0)
+  expect.equality(log_calls, 0)
+end
+
+T["public API clear_cache() clears cache and lockfile meta"] = function()
+  H.reset_state()
+  local plugin = require("tf-docs")
+  local cache = require("tf-docs.cache")
+  local lockfile = require("tf-docs.lockfile")
+
+  plugin.setup()
+
+  cache.set_required("/tmp/api-root", { aws = "hashicorp/aws" })
+  cache.set_root(998, "/tmp/api-root")
+  expect.equality(cache.get_required("/tmp/api-root").aws, "hashicorp/aws")
+
+  plugin.clear_cache()
+
+  expect.equality(cache.get_required("/tmp/api-root"), nil)
+  expect.equality(cache.get_root(998), nil)
+  expect.equality(next(lockfile.get_meta("/tmp/api-root")), nil)
+end
+
 T["TfDocOpen maps unresolved reason to user-facing message"] = function()
   H.reset_state()
   local plugin = require("tf-docs")

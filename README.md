@@ -87,17 +87,13 @@ Using lazy.nvim:
     --     -- Ensure we run after other attach handlers
     --     vim.schedule(function()
     --       vim.keymap.set("n", "K", function()
-    --         local ok_resolver, resolver = pcall(require, "tf-docs.resolver")
-    --         local ok_ui, ui = pcall(require, "tf-docs.ui")
-    --         if ok_resolver and ok_ui then
-    --           local ok, url = pcall(function()
-    --             local u = resolver.resolve(0) -- url|nil, trace
-    --             return u
-    --           end)
-    --           if ok and url and url ~= "" then
-    --             ui.open(url)
-    --             return
-    --           end
+    --         local tf = require("tf-docs")
+    --         -- resolve() returns (url|nil, trace) without opening anything,
+    --         -- so we can route to LSP hover when there's no docs to open.
+    --         local url = tf.resolve(0)
+    --         if url and url ~= "" then
+    --           tf.open(0)
+    --           return
     --         end
     --         if vim.lsp and vim.lsp.buf and vim.lsp.buf.hover then
     --           vim.lsp.buf.hover()
@@ -132,6 +128,29 @@ Now place the cursor inside a Terraform block and press `gK` (or `K` if you opte
   Display resolved provider versions from `.terraform.lock.hcl` in a floating window.
 * `:TfDocClearCache`
   Clear internal caches (root/provider/lockfile resolution). Use this after changing `required_providers` or `.terraform.lock.hcl`.
+
+## 🧩 Lua API
+
+For keymaps and integrations, prefer the public functions on the `tf-docs`
+module over requiring internal modules (`tf-docs.resolver`, `tf-docs.ui`, …),
+whose layout may change without notice. `open`/`copy_url`/`peek`/`list`/`resolve`
+take an optional `bufnr` (defaults to the current buffer); `resolve` also
+accepts an `opts` table, and `clear_cache` takes no arguments.
+
+```lua
+local tf = require("tf-docs")
+
+tf.open()        -- resolve the symbol under the cursor and open its docs
+tf.copy_url()    -- resolve and copy the docs URL to the clipboard
+tf.peek()        -- show the resolved URL + trace in a floating window
+tf.list()        -- pick a resource/data/module in the buffer and open its docs
+tf.clear_cache() -- clear internal caches (root/provider/lockfile resolution)
+
+-- resolve() returns the URL (or nil) and a trace without opening a browser
+-- or showing the "unresolved" notification, so callers can route the result
+-- themselves (e.g. K between tf-docs and LSP hover; see Installation).
+local url, trace = tf.resolve()
+```
 
 ## ⚙️ Configuration
 
