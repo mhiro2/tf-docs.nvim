@@ -8,12 +8,13 @@ CONTENTS                                               *tf-docs.nvim-contents*
   3. Setup ..................................... |tf-docs.nvim-setup|
   4. LSP Integration ........................... |tf-docs.nvim-lsp|
   5. Commands .................................. |tf-docs.nvim-commands|
-  6. Configuration ............................. |tf-docs.nvim-config|
-  7. Resolution Flow ........................... |tf-docs.nvim-resolution|
-  8. Examples .................................. |tf-docs.nvim-examples|
-  9. Troubleshooting .......................... |tf-docs.nvim-troubleshooting|
- 10. FAQ ....................................... |tf-docs.nvim-faq|
- 11. LICENSE ................................... |tf-docs.nvim-license|
+  6. Lua API ................................... |tf-docs.nvim-api|
+  7. Configuration ............................. |tf-docs.nvim-config|
+  8. Resolution Flow ........................... |tf-docs.nvim-resolution|
+  9. Examples .................................. |tf-docs.nvim-examples|
+ 10. Troubleshooting .......................... |tf-docs.nvim-troubleshooting|
+ 11. FAQ ....................................... |tf-docs.nvim-faq|
+ 12. LICENSE ................................... |tf-docs.nvim-license|
 
 ==============================================================================
 1. INTRODUCTION                                    *tf-docs.nvim-introduction*
@@ -87,16 +88,13 @@ To route tf-docs -> LSP hover when docs aren't available:
 
       vim.schedule(function()
         vim.keymap.set("n", "K", function()
-          local ok_resolver, resolver = pcall(require, "tf-docs.resolver")
-          local ok_ui, ui = pcall(require, "tf-docs.ui")
-          if ok_resolver and ok_ui then
-            local ok, url = pcall(function()
-              return resolver.resolve(0)
-            end)
-            if ok and url and url ~= "" then
-              ui.open(url)
-              return
-            end
+          local tf = require("tf-docs")
+          -- resolve() returns (url|nil, trace) without opening anything,
+          -- so we can route to LSP hover when there are no docs to open.
+          local url = tf.resolve(0)
+          if url and url ~= "" then
+            tf.open(0)
+            return
           end
           if vim.lsp and vim.lsp.buf and vim.lsp.buf.hover then
             vim.lsp.buf.hover()
@@ -148,7 +146,50 @@ To route tf-docs -> LSP hover when docs aren't available:
         Press q or <Esc> to close the window.
 
 ==============================================================================
-6. CONFIGURATION                                        *tf-docs.nvim-config*
+6. LUA API                                                  *tf-docs.nvim-api*
+
+For keymaps and integrations, prefer these public functions over requiring
+internal modules (tf-docs.resolver, tf-docs.ui, ...), whose layout may change
+without notice. open/copy_url/peek/list/resolve take an optional `bufnr` that
+defaults to the current buffer; resolve also accepts an `opts` table, and
+clear_cache takes no arguments.
+>lua
+  local tf = require("tf-docs")
+
+  tf.open()        -- resolve the symbol under cursor and open its docs
+  tf.copy_url()    -- resolve and copy the docs URL to the clipboard
+  tf.peek()        -- show the resolved URL + trace in a floating window
+  tf.list()        -- pick a resource/data/module and open its docs
+  tf.clear_cache() -- clear internal caches
+
+  -- resolve() returns the URL (or nil) and a trace without opening anything.
+  local url, trace = tf.resolve()
+<
+
+tf.open({bufnr})                                         *tf-docs.open()*
+        Resolve the symbol under the cursor and open its Terraform Registry
+        docs via vim.ui.open(). Notifies if resolution fails.
+
+tf.copy_url({bufnr})                                 *tf-docs.copy_url()*
+        Resolve and copy the docs URL to the clipboard.
+
+tf.peek({bufnr})                                         *tf-docs.peek()*
+        Show the resolved URL and trace in a floating window.
+
+tf.list({bufnr})                                         *tf-docs.list()*
+        List resource/data/module blocks in the buffer and open docs for the
+        selected item.
+
+tf.resolve({bufnr}, {opts})                           *tf-docs.resolve()*
+        Resolve the docs URL for the buffer. Returns (url|nil, trace) without
+        opening a browser or showing the "unresolved" notification, so callers
+        can route the result themselves.
+
+tf.clear_cache()                                  *tf-docs.clear_cache()*
+        Clear internal caches (root/provider/lockfile resolution).
+
+==============================================================================
+7. CONFIGURATION                                        *tf-docs.nvim-config*
 
 Default config:
 >lua
@@ -249,7 +290,7 @@ log_level                                             *tf-docs.nvim-log_level*
           - error: only errors
 
 ==============================================================================
-7. RESOLUTION FLOW                                   *tf-docs.nvim-resolution*
+8. RESOLUTION FLOW                                   *tf-docs.nvim-resolution*
 
 For a type like `google_compute_instance`:
 1. Detect context under cursor (resource/data/module).
@@ -266,7 +307,7 @@ Fallbacks:
   - If lockfile is missing: use default_version (default: latest)
 
 ==============================================================================
-8. EXAMPLES                                            *tf-docs.nvim-examples*
+9. EXAMPLES                                            *tf-docs.nvim-examples*
 
 Resource example:
 >lua
@@ -315,7 +356,7 @@ Anchor behavior is not guaranteed across all providers and is intentionally
 limited by allowlist.
 
 ==============================================================================
-9. TROUBLESHOOTING                              *tf-docs.nvim-troubleshooting*
+10. TROUBLESHOOTING                             *tf-docs.nvim-troubleshooting*
 
 "No terraform resource/data/module under cursor"
   - Ensure your buffer filetype is `terraform` or `hcl`:
@@ -352,7 +393,7 @@ Use :checkhealth tf-docs to verify your environment:
   - Optional Treesitter parser availability
 
 ==============================================================================
-10. FAQ                                                     *tf-docs.nvim-faq*
+11. FAQ                                                     *tf-docs.nvim-faq*
 
 Q: Why not just use Terraform CLI for schema?
 A: This plugin focuses on opening the right Terraform Registry docs
@@ -365,7 +406,7 @@ A: Yes—several plugins open Terraform docs. tf-docs.nvim differentiates by
    cursor-context-first UX.
 
 ==============================================================================
-11. LICENSE                                              *tf-docs.nvim-license*
+12. LICENSE                                              *tf-docs.nvim-license*
 
 MIT
 

@@ -51,45 +51,136 @@ local function format_unresolved_message(trace)
   return "Failed to resolve Terraform docs"
 end
 
+---Resolve the Terraform docs URL for a buffer without letting the resolver throw.
+---@param bufnr number
+---@param opts { context?: TfDocsContext, root?: string }|nil
+---@return string|nil, TfDocsTrace
+local function resolve_safe(bufnr, opts)
+  local cfg = config.get()
+  local ok, url_or_err, trace = pcall(resolver.resolve, bufnr, opts)
+  if not ok then
+    log.log(cfg, "error", string.format("tf-docs.nvim: unexpected error: %s", tostring(url_or_err)))
+    return nil, { reason = "exception", error = tostring(url_or_err) }
+  end
+  return url_or_err, trace
+end
+
+---@param trace TfDocsTrace|{ reason?: string, error?: string }|nil
+local function notify_unresolved(trace)
+  local cfg = config.get()
+  log.log(cfg, "warn", format_unresolved_message(trace))
+end
+
+-- ============================================================================
+-- Public API
+--
+-- These functions are the stable entry points for user keymaps and other
+-- plugins. Prefer them over requiring internal modules (tf-docs.resolver,
+-- tf-docs.ui, ...), whose layout may change without notice.
+-- ============================================================================
+
+---Resolve the symbol under the cursor and open its Terraform Registry docs.
+---@param bufnr? number Buffer to resolve (defaults to the current buffer).
+function M.open(bufnr)
+  local url, trace = resolve_safe(bufnr or 0)
+  if not url then
+    notify_unresolved(trace)
+    return
+  end
+  ui.open(url)
+end
+
+---Resolve the symbol under the cursor and copy its docs URL to the clipboard.
+---@param bufnr? number Buffer to resolve (defaults to the current buffer).
+function M.copy_url(bufnr)
+  local url, trace = resolve_safe(bufnr or 0)
+  if not url then
+    notify_unresolved(trace)
+    return
+  end
+  ui.copy(url)
+end
+
+---Show the resolved URL and trace for the symbol under the cursor in a float.
+---@param bufnr? number Buffer to resolve (defaults to the current buffer).
+function M.peek(bufnr)
+  local _, trace = resolve_safe(bufnr or 0)
+  ui.peek(trace)
+end
+
+---List resource/data/module blocks in the buffer and open docs for the choice.
+---@param bufnr? number Buffer to list (defaults to the current buffer).
+function M.list(bufnr)
+  bufnr = bufnr or 0
+  local resources = ts.list_resources(bufnr)
+  if #resources == 0 then
+    log.log(config.get(), "warn", "No terraform resources/data/modules found in current buffer")
+    return
+  end
+
+  local items = {}
+  for _, r in ipairs(resources) do
+    local label
+    if r.kind == "module" then
+      label = string.format("[%s] %s (line %d)", r.kind, r.name, r.line)
+    else
+      label = string.format("[%s] %s (line %d)", r.kind, r.type, r.line)
+    end
+    table.insert(items, { label = label, resource = r })
+  end
+
+  ui.select(items, {
+    prompt = "Select a resource to open docs:",
+    format_item = function(item)
+      return item.label
+    end,
+  }, function(selected)
+    if not selected then
+      return
+    end
+
+    local r = selected.resource
+    local context = ts.get_context(bufnr, { r.line, 0 })
+    if not context then
+      notify_unresolved({ reason = "list-context-unresolved" })
+      return
+    end
+    local url, trace = resolve_safe(bufnr, { context = context })
+
+    if not url then
+      notify_unresolved(trace)
+      return
+    end
+
+    ui.open(url)
+  end)
+end
+
+---Resolve the Terraform docs URL for a buffer.
+---@param bufnr? number Buffer to resolve (defaults to the current buffer).
+---@param opts? { context?: TfDocsContext, root?: string }
+---@return string|nil url, TfDocsTrace trace
+function M.resolve(bufnr, opts)
+  return resolve_safe(bufnr or 0, opts)
+end
+
+---Clear tf-docs internal caches (root/provider/lockfile resolution).
+function M.clear_cache()
+  clear_runtime_cache()
+  log.log(config.get(), "info", "tf-docs.nvim cache cleared")
+end
+
 local function create_commands()
   if commands_created then
     return
   end
 
-  ---@param bufnr number
-  ---@param opts { context?: TfDocsContext, root?: string }|nil
-  ---@return string|nil, TfDocsTrace
-  local function resolve_safe(bufnr, opts)
-    local cfg = config.get()
-    local ok, url_or_err, trace = pcall(resolver.resolve, bufnr, opts)
-    if not ok then
-      log.log(cfg, "error", string.format("tf-docs.nvim: unexpected error: %s", tostring(url_or_err)))
-      return nil, { reason = "exception", error = tostring(url_or_err) }
-    end
-    return url_or_err, trace
-  end
-
-  local function notify_unresolved(trace)
-    local cfg = config.get()
-    log.log(cfg, "warn", format_unresolved_message(trace))
-  end
-
   vim.api.nvim_create_user_command("TfDocOpen", function()
-    local url, trace = resolve_safe(0)
-    if not url then
-      notify_unresolved(trace)
-      return
-    end
-    ui.open(url)
+    M.open(0)
   end, {})
 
   vim.api.nvim_create_user_command("TfDocCopyUrl", function()
-    local url, trace = resolve_safe(0)
-    if not url then
-      notify_unresolved(trace)
-      return
-    end
-    ui.copy(url)
+    M.copy_url(0)
   end, {})
 
   vim.api.nvim_create_user_command("TfDocDebug", function()
@@ -110,8 +201,7 @@ local function create_commands()
   end, {})
 
   vim.api.nvim_create_user_command("TfDocPeek", function()
-    local _, trace = resolve_safe(0)
-    ui.peek(trace)
+    M.peek(0)
   end, {})
 
   vim.api.nvim_create_user_command("TfDocVersion", function()
@@ -133,54 +223,11 @@ local function create_commands()
   end, {})
 
   vim.api.nvim_create_user_command("TfDocClearCache", function()
-    cache.clear()
-    lockfile.clear_meta()
-    log.log(config.get(), "info", "tf-docs.nvim cache cleared")
+    M.clear_cache()
   end, {})
 
   vim.api.nvim_create_user_command("TfDocList", function()
-    local resources = ts.list_resources(0)
-    if #resources == 0 then
-      log.log(config.get(), "warn", "No terraform resources/data/modules found in current buffer")
-      return
-    end
-
-    local items = {}
-    for _, r in ipairs(resources) do
-      local label
-      if r.kind == "module" then
-        label = string.format("[%s] %s (line %d)", r.kind, r.name, r.line)
-      else
-        label = string.format("[%s] %s (line %d)", r.kind, r.type, r.line)
-      end
-      table.insert(items, { label = label, resource = r })
-    end
-
-    ui.select(items, {
-      prompt = "Select a resource to open docs:",
-      format_item = function(item)
-        return item.label
-      end,
-    }, function(selected)
-      if not selected then
-        return
-      end
-
-      local r = selected.resource
-      local context = ts.get_context(0, { r.line, 0 })
-      if not context then
-        notify_unresolved({ reason = "list-context-unresolved" })
-        return
-      end
-      local url, trace = resolve_safe(0, { context = context })
-
-      if not url then
-        notify_unresolved(trace)
-        return
-      end
-
-      ui.open(url)
-    end)
+    M.list(0)
   end, {})
 
   commands_created = true
@@ -212,7 +259,7 @@ local function create_autocmds()
   })
 end
 
----@param opts TfDocsConfig|nil
+---@param opts TfDocsOpts|nil
 function M.setup(opts)
   config.setup(opts)
   clear_runtime_cache()

@@ -10,6 +10,21 @@
 ---@field log_level string
 ---@field ui_select_backend "auto"|"builtin"
 
+--- Partial configuration accepted by setup(). Every field is optional; omitted
+--- fields fall back to the defaults, so passing e.g. { default_version = "x" }
+--- does not trigger LuaLS "missing fields" warnings.
+---@class TfDocsOpts
+---@field root_markers? string[]
+---@field default_namespace? string
+---@field default_version? string
+---@field required_providers_files? string[]
+---@field enable_anchor? boolean
+---@field anchor_providers_allowlist? string[]
+---@field provider_overrides? table<string, string>
+---@field enable_module_docs? boolean
+---@field log_level? "debug"|"info"|"warn"|"error"
+---@field ui_select_backend? "auto"|"builtin"
+
 local M = {}
 
 ---@type TfDocsConfig
@@ -138,7 +153,7 @@ default_config = {
 ---@type TfDocsConfig
 local current = vim.deepcopy(default_config)
 
----@param opts TfDocsConfig|nil
+---@param opts TfDocsOpts|nil
 ---@return TfDocsConfig
 function M.setup(opts)
   if opts == nil then
