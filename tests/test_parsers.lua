@@ -118,11 +118,48 @@ T["url builder creates resource and data URLs"] = function()
   expect.equality(data, "https://registry.terraform.io/providers/hashicorp/aws/1.2.3/docs/data-sources/ami")
 end
 
-T["module_url cleans VCS subdir and ref"] = function()
+T["module_url cleans VCS subdir, ref, and trailing .git"] = function()
   H.reset_state()
   local url = require("tf-docs.url")
   local out = url.module_url("git::https://github.com/org/repo.git//subdir?ref=v1.2.3")
-  expect.equality(out, "https://github.com/org/repo.git")
+  expect.equality(out, "https://github.com/org/repo")
+end
+
+T["module_url normalizes SCP-like git@ sources to https"] = function()
+  H.reset_state()
+  local url = require("tf-docs.url")
+  expect.equality(url.module_url("git@github.com:org/repo.git"), "https://github.com/org/repo")
+  expect.equality(url.module_url("git::git@github.com:org/repo.git//modules/foo?ref=v1"), "https://github.com/org/repo")
+end
+
+T["module_url normalizes ssh git sources to https"] = function()
+  H.reset_state()
+  local url = require("tf-docs.url")
+  expect.equality(url.module_url("ssh://git@github.com/org/repo.git"), "https://github.com/org/repo")
+  expect.equality(url.module_url("git::ssh://git@gitlab.com/org/repo.git//sub"), "https://gitlab.com/org/repo")
+end
+
+T["module_url drops ssh port and userinfo to avoid confusable URLs"] = function()
+  H.reset_state()
+  local url = require("tf-docs.url")
+  -- SSH port must not leak into the browsable URL.
+  expect.equality(url.module_url("ssh://git@github.com:22/org/repo.git"), "https://github.com/org/repo")
+  -- A userinfo that looks like a host must not survive as https://host@other.
+  expect.equality(url.module_url("ssh://github.com@evil.example/org/repo.git"), "https://evil.example/org/repo")
+  -- Multiple '@' must resolve to the host after the last '@' (no host@other).
+  expect.equality(url.module_url("ssh://git@github.com@evil.example/org/repo.git"), "https://evil.example/org/repo")
+  expect.equality(url.module_url("git@github.com@evil.example:org/repo.git"), "https://evil.example/org/repo")
+  -- A host:port/path registry source without userinfo is not SCP syntax.
+  expect.equality(url.module_url("localhost:5000/ns/name/provider"), nil)
+end
+
+T["module_url keeps registry shorthand and resolves it"] = function()
+  H.reset_state()
+  local url = require("tf-docs.url")
+  expect.equality(
+    url.module_url("terraform-aws-modules/vpc/aws"),
+    "https://registry.terraform.io/modules/terraform-aws-modules/vpc/aws"
+  )
 end
 
 T["required_providers.resolve merges multiple files (later overrides earlier)"] = function()

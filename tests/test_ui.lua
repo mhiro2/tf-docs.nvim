@@ -38,6 +38,91 @@ T["ui.open treats nil return from vim.ui.open as failure"] = function()
   expect.equality(logs[1].msg, "vim.ui.open failed: browser unavailable")
 end
 
+T["ui.open refuses non-http(s) URLs without calling vim.ui.open"] = function()
+  H.reset_state()
+  local ui = require("tf-docs.ui")
+  local log = require("tf-docs.log")
+
+  local logs = {}
+  local open_calls = 0
+  local ok = H.with_patches({
+    {
+      target = vim,
+      key = "ui",
+      value = {
+        open = function()
+          open_calls = open_calls + 1
+          return true
+        end,
+      },
+    },
+    {
+      target = log,
+      key = "log",
+      value = function(_, level, msg)
+        table.insert(logs, { level = level, msg = msg })
+      end,
+    },
+  }, function()
+    return ui.open("ssh://git@github.com/org/repo")
+  end)
+
+  expect.equality(ok, false)
+  expect.equality(open_calls, 0)
+  expect.equality(#logs, 1)
+  expect.equality(logs[1].level, "warn")
+  expect.equality(logs[1].msg, "Refusing to open non-http(s) URL: ssh://git@github.com/org/repo")
+end
+
+T["ui.open allows http(s) URLs"] = function()
+  H.reset_state()
+  local ui = require("tf-docs.ui")
+
+  local opened
+  local ok = H.with_patches({
+    {
+      target = vim,
+      key = "ui",
+      value = {
+        open = function(url)
+          opened = url
+          return true
+        end,
+      },
+    },
+  }, function()
+    return ui.open("http://registry.terraform.io/x")
+  end)
+
+  expect.equality(ok, true)
+  expect.equality(opened, "http://registry.terraform.io/x")
+end
+
+T["ui.open accepts uppercase http(s) scheme and preserves the original URL"] = function()
+  H.reset_state()
+  local ui = require("tf-docs.ui")
+
+  local opened
+  local ok = H.with_patches({
+    {
+      target = vim,
+      key = "ui",
+      value = {
+        open = function(url)
+          opened = url
+          return true
+        end,
+      },
+    },
+  }, function()
+    return ui.open("HTTPS://registry.terraform.io/Path")
+  end)
+
+  expect.equality(ok, true)
+  -- The scheme check is case-insensitive, but the original URL is opened as-is.
+  expect.equality(opened, "HTTPS://registry.terraform.io/Path")
+end
+
 T["ui versions view shows missing lockfile and empty providers"] = function()
   H.reset_state()
   local ui = require("tf-docs.ui")

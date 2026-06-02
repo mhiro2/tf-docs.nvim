@@ -102,6 +102,14 @@ end
 ---@return boolean
 function M.open(url)
   local cfg = config.get()
+  -- Only open http(s) URLs. Module sources can produce arbitrary URIs
+  -- (e.g. file://, ssh://, scp-like), which are useless or unsafe to hand to
+  -- vim.ui.open, so reject anything outside the http(s) allowlist. URL schemes
+  -- are case-insensitive, so match the scheme without regard to case.
+  if type(url) ~= "string" or not url:lower():match("^https?://") then
+    log.log(cfg, "warn", string.format("Refusing to open non-http(s) URL: %s", tostring(url)))
+    return false
+  end
   if not vim.ui or not vim.ui.open then
     log.log(cfg, "error", "vim.ui.open is unavailable (available since Neovim 0.10.0)")
     return false

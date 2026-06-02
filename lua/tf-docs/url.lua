@@ -40,16 +40,41 @@ function M.module_url(source)
     return nil
   end
 
-  local cleaned = source:gsub("^git::", "")
-
   -- Best-effort cleanup for VCS module sources:
-  -- - strip query (e.g. ?ref=...)
-  -- - drop Terraform subdir syntax (//subdir)
+  -- - strip the git:: forced-protocol prefix and any query (e.g. ?ref=...)
+  local cleaned = source:gsub("^git::", "")
   cleaned = cleaned:gsub("%?.*$", "")
 
-  -- Common form: https://host/org/repo(.git)//subdir
-  cleaned = cleaned:gsub("%.git//.*$", ".git")
+  -- Drop the userinfo and port from a "[user@]host[:port]" authority, leaving
+  -- just the host. Userinfo is stripped up to the LAST '@' (matching how
+  -- browsers resolve "a@b@host"), so a crafted source cannot leave a
+  -- confusable "host@other" in the generated https URL.
+  local function host_only(authority)
+    return (authority:gsub("^.*@", ""):gsub(":%d+$", ""))
+  end
 
+  -- Normalize non-browsable VCS schemes to https so vim.ui.open can open them.
+  -- ssh://[user@]host[:port]/path -> https://host/path
+  local ssh_rest = cleaned:match("^ssh://(.+)$")
+  if ssh_rest then
+    local authority, path = ssh_rest:match("^([^/]*)(/.*)$")
+    if not authority then
+      authority, path = ssh_rest, ""
+    end
+    cleaned = "https://" .. host_only(authority) .. path
+  end
+
+  -- SCP-like syntax: user@host:org/repo -> https://host/org/repo. Require an
+  -- explicit userinfo '@' so we don't mistake a "host:port/path" registry
+  -- source for SCP syntax.
+  if not cleaned:find("://", 1, true) and cleaned:find("@", 1, true) then
+    local authority, path = cleaned:match("^([^/]+):(.+)$")
+    if authority then
+      cleaned = "https://" .. host_only(authority) .. "/" .. path
+    end
+  end
+
+  -- Drop Terraform subdir syntax (//subdir), preserving the scheme's "://".
   local scheme_start = cleaned:find("://", 1, true)
   if scheme_start then
     local rest = cleaned:sub(scheme_start + 3)
@@ -64,7 +89,10 @@ function M.module_url(source)
     end
   end
 
-  if cleaned:match("^https?://") or cleaned:match("^ssh://") or cleaned:match("^git@") then
+  -- Strip a trailing .git so the URL points at the browsable repo page.
+  cleaned = cleaned:gsub("%.git$", "")
+
+  if cleaned:match("^https?://") then
     return cleaned
   end
 
