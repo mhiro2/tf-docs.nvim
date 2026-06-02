@@ -166,8 +166,11 @@ require("tf-docs").setup({
   --   module "x" { source = "..." }
   -- tf-docs tries to resolve a URL from `source`:
   -- - Terraform Registry modules: "namespace/name/provider" or "registry.terraform.io/..."
-  -- - VCS/URL sources: "https://...", "ssh://...", "git@..." (with light cleanup)
+  -- - VCS/URL sources: "https://...", "ssh://git@...", "git@host:org/repo" are
+  --   normalized to a browsable "https://host/org/repo" (the git:: prefix,
+  --   "?ref=" query, "//subdir", and trailing ".git" are stripped).
   -- If it can't build a URL, it falls back to "unresolved".
+  -- Only http(s) URLs are opened; any other scheme is refused.
   enable_module_docs = true,
 
   -- UI backend for selection (e.g., `:TfDocList`).

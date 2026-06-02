@@ -231,9 +231,12 @@ enable_module_docs                           *tf-docs.nvim-enable_module_docs*
               "namespace/name/provider"
               "registry.terraform.io/namespace/name/provider"
           - VCS/URL sources:
-              "https://...", "ssh://...", "git@..."
-            (with light cleanup: strip query, drop //subdir, etc.)
+              "https://...", "ssh://git@...", "git@host:org/repo"
+            are normalized to a browsable "https://host/org/repo" (the git::
+            prefix, "?ref=" query, "//subdir", and trailing ".git" are
+            stripped).
         If a URL can't be built, module resolution is treated as "unresolved".
+        Only http(s) URLs are opened; any other scheme is refused.
 
 ui_select_backend                          *tf-docs.nvim-ui_select_backend*
         UI backend for selection (e.g., :TfDocList):
