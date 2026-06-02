@@ -66,15 +66,83 @@ local function set_cached_context(bufnr, cursor, context)
   }
 end
 
+-- Block keywords are never valid anchor candidates (they introduce a block,
+-- not an argument/attribute), so exclude them in one place.
+local BLOCK_KEYWORDS = { resource = true, data = true, module = true }
+
 ---@param line string
 ---@return string|nil
 local function anchor_from_line(line)
   local key = line:match("^%s*([%w_%-]+)%s*=")
-  if key then
-    return key
+  if not key then
+    key = line:match("^%s*([%w_%-]+)%s*{")
   end
-  key = line:match("^%s*([%w_%-]+)%s*{")
+  if not key or BLOCK_KEYWORDS[key] then
+    return nil
+  end
   return key
+end
+
+---@class TfDocsHeader
+---@field kind "resource"|"data"|"module"
+---@field type string|nil
+---@field name string
+
+-- Match a Terraform block header line and extract its kind/type/name.
+-- Shared by the treesitter path, the upward-scan fallback, and list_resources.
+---@param line string
+---@return TfDocsHeader|nil
+local function match_header(line)
+  local type_name, name = line:match('^%s*resource%s+"([^"]+)"%s+"([^"]+)"')
+  if type_name then
+    return { kind = "resource", type = type_name, name = name }
+  end
+
+  type_name, name = line:match('^%s*data%s+"([^"]+)"%s+"([^"]+)"')
+  if type_name then
+    return { kind = "data", type = type_name, name = name }
+  end
+
+  name = line:match('^%s*module%s+"([^"]+)"')
+  if name then
+    return { kind = "module", type = nil, name = name }
+  end
+
+  return nil
+end
+
+---@param block_text string
+---@return string|nil
+local function provider_hint_from_block_text(block_text)
+  local tokens = hcl.tokenize(block_text)
+  local i = 1
+  local n = #tokens
+  local depth = 0
+  local started = false
+  while i <= n do
+    local t = tokens[i]
+    if t.kind == "symbol" and t.value == "{" then
+      depth = depth + 1
+      started = true
+      i = i + 1
+    elseif t.kind == "symbol" and t.value == "}" then
+      depth = math.max(0, depth - 1)
+      i = i + 1
+      if started and depth == 0 then
+        break
+      end
+    elseif depth == 1 and t.kind == "ident" and t.value == "provider" then
+      local eq = tokens[i + 1]
+      local v1 = tokens[i + 2]
+      if eq and eq.kind == "symbol" and eq.value == "=" and v1 and v1.kind == "ident" then
+        return v1.value
+      end
+      i = i + 1
+    else
+      i = i + 1
+    end
+  end
+  return nil
 end
 
 ---@param bufnr number
@@ -123,9 +191,6 @@ local function get_context_treesitter(bufnr, cursor_pos)
 
   local lines_for_anchor = vim.api.nvim_buf_get_lines(bufnr, row0, row0 + 1, false)
   local anchor = anchor_from_line(lines_for_anchor[1] or "")
-  if anchor == "resource" or anchor == "data" or anchor == "module" then
-    anchor = nil
-  end
 
   local ok_node, node = pcall(function()
     return root:named_descendant_for_range(row0, col0, row0, col0)
@@ -142,40 +207,6 @@ local function get_context_treesitter(bufnr, cursor_pos)
   local max_module_scan_lines = 500
   local max_block_scan_lines = 500
 
-  ---@param block_text string
-  ---@return string|nil
-  local function provider_hint_from_block_text(block_text)
-    local tokens = hcl.tokenize(block_text)
-    local i = 1
-    local n = #tokens
-    local depth = 0
-    local started = false
-    while i <= n do
-      local t = tokens[i]
-      if t.kind == "symbol" and t.value == "{" then
-        depth = depth + 1
-        started = true
-        i = i + 1
-      elseif t.kind == "symbol" and t.value == "}" then
-        depth = math.max(0, depth - 1)
-        i = i + 1
-        if started and depth == 0 then
-          break
-        end
-      elseif depth == 1 and t.kind == "ident" and t.value == "provider" then
-        local eq = tokens[i + 1]
-        local v1 = tokens[i + 2]
-        if eq and eq.kind == "symbol" and eq.value == "=" and v1 and v1.kind == "ident" then
-          return v1.value
-        end
-        i = i + 1
-      else
-        i = i + 1
-      end
-    end
-    return nil
-  end
-
   while node do
     local ok_range, sr, _, er, _ = pcall(function()
       return node:range()
@@ -183,25 +214,9 @@ local function get_context_treesitter(bufnr, cursor_pos)
     if not ok_range then
       return nil
     end
-    local line = header_line_at(sr)
+    local header = match_header(header_line_at(sr))
 
-    local type_name = line:match('^%s*resource%s+"([^"]+)"%s+"[^"]+"')
-    if type_name then
-      local scan_end = math.min(er + 1, sr + max_block_scan_lines)
-      local block_lines = vim.api.nvim_buf_get_lines(bufnr, sr, scan_end, false)
-      local provider_hint = provider_hint_from_block_text(table.concat(block_lines, "\n"))
-      return { kind = "resource", type = type_name, provider_hint = provider_hint, anchor_candidate = anchor }
-    end
-
-    type_name = line:match('^%s*data%s+"([^"]+)"%s+"[^"]+"')
-    if type_name then
-      local scan_end = math.min(er + 1, sr + max_block_scan_lines)
-      local block_lines = vim.api.nvim_buf_get_lines(bufnr, sr, scan_end, false)
-      local provider_hint = provider_hint_from_block_text(table.concat(block_lines, "\n"))
-      return { kind = "data", type = type_name, provider_hint = provider_hint, anchor_candidate = anchor }
-    end
-
-    if line:match('^%s*module%s+"[^"]+"') then
+    if header and header.kind == "module" then
       local scan_end = math.min(er + 1, sr + max_module_scan_lines)
       local block_lines = vim.api.nvim_buf_get_lines(bufnr, sr, scan_end, false)
       local source
@@ -213,6 +228,11 @@ local function get_context_treesitter(bufnr, cursor_pos)
         end
       end
       return { kind = "module", type = nil, module_source = source, anchor_candidate = anchor }
+    elseif header then
+      local scan_end = math.min(er + 1, sr + max_block_scan_lines)
+      local block_lines = vim.api.nvim_buf_get_lines(bufnr, sr, scan_end, false)
+      local provider_hint = provider_hint_from_block_text(table.concat(block_lines, "\n"))
+      return { kind = header.kind, type = header.type, provider_hint = provider_hint, anchor_candidate = anchor }
     end
 
     local ok_parent, parent = pcall(function()
@@ -258,9 +278,6 @@ function M.get_context(bufnr, cursor_pos)
   local current_line = vim.api.nvim_buf_get_lines(bufnr, row - 1, row, false)[1] or ""
 
   local anchor = anchor_from_line(current_line)
-  if anchor == "resource" or anchor == "data" or anchor == "module" then
-    anchor = nil
-  end
 
   local function count_braces(line)
     local opens = 0
@@ -306,40 +323,6 @@ function M.get_context(bufnr, cursor_pos)
     return source
   end
 
-  ---@param block_text string
-  ---@return string|nil
-  local function provider_hint_from_block_text(block_text)
-    local tokens = hcl.tokenize(block_text)
-    local i = 1
-    local n = #tokens
-    local depth = 0
-    local started = false
-    while i <= n do
-      local t = tokens[i]
-      if t.kind == "symbol" and t.value == "{" then
-        depth = depth + 1
-        started = true
-        i = i + 1
-      elseif t.kind == "symbol" and t.value == "}" then
-        depth = math.max(0, depth - 1)
-        i = i + 1
-        if started and depth == 0 then
-          break
-        end
-      elseif depth == 1 and t.kind == "ident" and t.value == "provider" then
-        local eq = tokens[i + 1]
-        local v1 = tokens[i + 2]
-        if eq and eq.kind == "symbol" and eq.value == "=" and v1 and v1.kind == "ident" then
-          return v1.value
-        end
-        i = i + 1
-      else
-        i = i + 1
-      end
-    end
-    return nil
-  end
-
   ---@param start_line number
   ---@return string|nil
   local function find_provider_hint(start_line)
@@ -359,21 +342,9 @@ function M.get_context(bufnr, cursor_pos)
       local lines = vim.api.nvim_buf_get_lines(bufnr, chunk_start - 1, chunk_end, false)
       for idx = #lines, 1, -1 do
         local line_number = chunk_start + idx - 1
-        local line = lines[idx]
-
-        local kind, type_name = line:match('^%s*(resource)%s+"([^"]+)"%s+"[^"]+"')
-        if kind and type_name then
-          return { kind = kind, type = type_name, line = line_number }
-        end
-
-        kind, type_name = line:match('^%s*(data)%s+"([^"]+)"%s+"[^"]+"')
-        if kind and type_name then
-          return { kind = kind, type = type_name, line = line_number }
-        end
-
-        local module_kind = line:match('^%s*(module)%s+"[^"]+"')
-        if module_kind then
-          return { kind = "module", type = nil, line = line_number }
+        local header = match_header(lines[idx])
+        if header then
+          return { kind = header.kind, type = header.type, line = line_number }
         end
       end
       chunk_end = chunk_start - 1
@@ -422,19 +393,9 @@ function M.list_resources(bufnr)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
 
   for i, line in ipairs(lines) do
-    local kind, type_name, name = line:match('^%s*(resource)%s+"([^"]+)"%s+"([^"]+)"')
-    if kind and type_name and name then
-      table.insert(results, { kind = kind, type = type_name, name = name, line = i })
-    else
-      kind, type_name, name = line:match('^%s*(data)%s+"([^"]+)"%s+"([^"]+)"')
-      if kind and type_name and name then
-        table.insert(results, { kind = kind, type = type_name, name = name, line = i })
-      else
-        kind, name = line:match('^%s*(module)%s+"([^"]+)"')
-        if kind and name then
-          table.insert(results, { kind = kind, type = nil, name = name, line = i })
-        end
-      end
+    local header = match_header(line)
+    if header then
+      table.insert(results, { kind = header.kind, type = header.type, name = header.name, line = i })
     end
   end
 
