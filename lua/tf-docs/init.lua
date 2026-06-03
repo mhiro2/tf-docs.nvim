@@ -220,11 +220,11 @@ local function create_commands()
 
   vim.api.nvim_create_user_command("TfDocOpen", function()
     M.open(0)
-  end, {})
+  end, { desc = "tf-docs: open Terraform Registry docs for the symbol under the cursor" })
 
   vim.api.nvim_create_user_command("TfDocCopyUrl", function()
     M.copy_url(0)
-  end, {})
+  end, { desc = "tf-docs: copy the docs URL for the symbol under the cursor" })
 
   vim.api.nvim_create_user_command("TfDocDebug", function()
     local _, trace = resolve_safe(0)
@@ -241,11 +241,11 @@ local function create_commands()
       string.format("  reason: %s", trace.reason or "(none)"),
     }
     log.log_force("info", table.concat(info, "\n"))
-  end, {})
+  end, { desc = "tf-docs: print the resolution trace for the symbol under the cursor" })
 
   vim.api.nvim_create_user_command("TfDocPeek", function()
     M.peek(0)
-  end, {})
+  end, { desc = "tf-docs: preview the resolved docs URL and trace in a float" })
 
   vim.api.nvim_create_user_command("TfDocVersion", function()
     local cfg = config.get()
@@ -263,15 +263,15 @@ local function create_commands()
     local has_lockfile = stat ~= nil and stat.type == "file"
 
     ui.show_versions(versions, root, meta, has_lockfile)
-  end, {})
+  end, { desc = "tf-docs: show provider versions resolved from .terraform.lock.hcl" })
 
   vim.api.nvim_create_user_command("TfDocClearCache", function()
     M.clear_cache()
-  end, {})
+  end, { desc = "tf-docs: clear internal resolution caches" })
 
   vim.api.nvim_create_user_command("TfDocList", function()
     M.list(0)
-  end, {})
+  end, { desc = "tf-docs: list resource/data/module blocks and open docs for a choice" })
 
   commands_created = true
 end
