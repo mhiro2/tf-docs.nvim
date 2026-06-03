@@ -2,7 +2,6 @@ local M = {}
 
 ---@class TfDocsCacheEntry
 ---@field value any
----@field updated number
 
 ---@type table<string, TfDocsCacheEntry>
 local required_cache = {}
@@ -18,48 +17,30 @@ local provider_versions_cache = {}
 ---@type table<string, string>
 local slug_cache = {}
 
-local function is_fresh(entry, ttl)
-  if not entry then
-    return false
-  end
-  if not ttl or ttl <= 0 then
-    return true
-  end
-  return (os.time() - entry.updated) <= ttl
-end
-
 ---@param root string
----@param ttl number|nil
 ---@return table|nil
-function M.get_required(root, ttl)
+function M.get_required(root)
   local entry = required_cache[root]
-  if is_fresh(entry, ttl) then
-    return entry.value
-  end
-  return nil
+  return entry and entry.value or nil
 end
 
 ---@param root string
 ---@param value table
 function M.set_required(root, value)
-  required_cache[root] = { value = value, updated = os.time() }
+  required_cache[root] = { value = value }
 end
 
 ---@param root string
----@param ttl number|nil
 ---@return table|nil
-function M.get_lockfile(root, ttl)
+function M.get_lockfile(root)
   local entry = lockfile_cache[root]
-  if is_fresh(entry, ttl) then
-    return entry.value
-  end
-  return nil
+  return entry and entry.value or nil
 end
 
 ---@param root string
 ---@param value table
 function M.set_lockfile(root, value)
-  lockfile_cache[root] = { value = value, updated = os.time() }
+  lockfile_cache[root] = { value = value }
 end
 
 ---@param bufnr number
