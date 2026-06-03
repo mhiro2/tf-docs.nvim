@@ -268,6 +268,99 @@ T["ts.get_context cache invalidates when buffer changedtick changes"] = function
   expect.equality(parse_calls, 2)
 end
 
+T["ts.clear_buf_context drops only the given buffer's cached context"] = function()
+  H.reset_state()
+  local ts = require("tf-docs.ts")
+  local parse_calls = 0
+  local tree = {
+    root = function()
+      return {
+        named_descendant_for_range = function()
+          return {
+            range = function()
+              return 0, 0, 4, 0
+            end,
+          }
+        end,
+      }
+    end,
+  }
+  local parser = {
+    parse = function()
+      parse_calls = parse_calls + 1
+      return { tree }
+    end,
+  }
+
+  H.with_treesitter({
+    get_parser = function()
+      return parser
+    end,
+  }, function()
+    H.with_scratch_buf({
+      lines = {
+        'resource "aws_instance" "x" {',
+        "  tags = {}",
+        "}",
+      },
+      cursor = { 2, 2 },
+    }, function(bufnr)
+      ts.get_context(bufnr)
+      ts.clear_buf_context(bufnr)
+      ts.get_context(bufnr)
+    end)
+  end)
+
+  -- The second call re-parses because the buffer's cache entry was cleared.
+  expect.equality(parse_calls, 2)
+end
+
+T["ts.clear_context_cache drops all cached contexts"] = function()
+  H.reset_state()
+  local ts = require("tf-docs.ts")
+  local parse_calls = 0
+  local tree = {
+    root = function()
+      return {
+        named_descendant_for_range = function()
+          return {
+            range = function()
+              return 0, 0, 4, 0
+            end,
+          }
+        end,
+      }
+    end,
+  }
+  local parser = {
+    parse = function()
+      parse_calls = parse_calls + 1
+      return { tree }
+    end,
+  }
+
+  H.with_treesitter({
+    get_parser = function()
+      return parser
+    end,
+  }, function()
+    H.with_scratch_buf({
+      lines = {
+        'resource "aws_instance" "x" {',
+        "  tags = {}",
+        "}",
+      },
+      cursor = { 2, 2 },
+    }, function(bufnr)
+      ts.get_context(bufnr)
+      ts.clear_context_cache()
+      ts.get_context(bufnr)
+    end)
+  end)
+
+  expect.equality(parse_calls, 2)
+end
+
 T["ts.list_resources returns all resources and data sources"] = function()
   H.reset_state()
   local ts = require("tf-docs.ts")

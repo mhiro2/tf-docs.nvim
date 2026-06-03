@@ -15,6 +15,7 @@ local autocmd_group = "tf-docs.nvim"
 local function clear_runtime_cache()
   cache.clear()
   lockfile.clear_meta()
+  ts.clear_context_cache()
 end
 
 ---@type table<string, string>
@@ -262,6 +263,7 @@ local function create_autocmds()
     callback = function(args)
       if args and type(args.buf) == "number" and args.buf > 0 then
         cache.clear_buf(args.buf)
+        ts.clear_buf_context(args.buf)
       end
     end,
   })

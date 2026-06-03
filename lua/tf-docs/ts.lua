@@ -12,19 +12,14 @@ local hcl = require("tf-docs.hcl")
 ---@field row number
 ---@field col number
 ---@field changedtick number
----@field created_ns integer
 ---@field context TfDocsContext|nil
 
 local context_cache = {} ---@type table<number, TfDocsContextCacheEntry>
-local context_cache_ttl_ns = 300 * 1000 * 1000
 
----@return integer
-local function now_ns()
-  if vim.uv and vim.uv.hrtime then
-    return vim.uv.hrtime()
-  end
-  return 0
-end
+-- The cache is keyed by (cursor position, changedtick): both uniquely determine
+-- the resolved context, so no time-based expiry is needed. Stale entries are
+-- dropped on changedtick mismatch here, and on buffer wipe / file rename /
+-- :TfDocClearCache via clear_buf_context / clear_context_cache.
 
 ---@param bufnr number
 ---@param cursor integer[]
@@ -39,13 +34,13 @@ local function get_cached_context(bufnr, cursor)
     return false, nil
   end
 
-  local changedtick = vim.api.nvim_buf_get_changedtick(bufnr)
-  if entry.changedtick ~= changedtick then
+  -- The buffer may have been wiped and its number reused; guard the lookup.
+  local ok, changedtick = pcall(vim.api.nvim_buf_get_changedtick, bufnr)
+  if not ok then
     context_cache[bufnr] = nil
     return false, nil
   end
-
-  if now_ns() - entry.created_ns > context_cache_ttl_ns then
+  if entry.changedtick ~= changedtick then
     context_cache[bufnr] = nil
     return false, nil
   end
@@ -57,11 +52,14 @@ end
 ---@param cursor integer[]
 ---@param context TfDocsContext|nil
 local function set_cached_context(bufnr, cursor, context)
+  local ok, changedtick = pcall(vim.api.nvim_buf_get_changedtick, bufnr)
+  if not ok then
+    return
+  end
   context_cache[bufnr] = {
     row = cursor[1],
     col = cursor[2],
-    changedtick = vim.api.nvim_buf_get_changedtick(bufnr),
-    created_ns = now_ns(),
+    changedtick = changedtick,
     context = context,
   }
 end
@@ -376,7 +374,14 @@ function M.get_context(bufnr, cursor_pos)
   return context
 end
 
-function M._clear_context_cache_for_test()
+---Drop the cached context for a single buffer (e.g. on BufWipeout/BufFilePost).
+---@param bufnr number
+function M.clear_buf_context(bufnr)
+  context_cache[bufnr] = nil
+end
+
+---Drop all cached contexts (e.g. on :TfDocClearCache).
+function M.clear_context_cache()
   context_cache = {}
 end
 
