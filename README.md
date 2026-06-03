@@ -236,6 +236,9 @@ Fallbacks:
 
 * If `required_providers` is missing: `hashicorp/<provider>` (configurable)
 * If lockfile is missing: `latest` (configurable)
+* If the provider has no version entry in `.terraform.lock.hcl`, or has more
+  than one, tf-docs still resolves a URL using the fallback (or first) version
+  and an info-level notice explains which fallback was used
 
 ### How the docs slug is resolved
 

@@ -93,7 +93,7 @@ function M.reset_state()
   cache.clear()
   lockfile.clear_meta()
   config.setup(nil)
-  ts._clear_context_cache_for_test()
+  ts.clear_context_cache()
   ui_backend._clear_cache_for_test()
 end
 

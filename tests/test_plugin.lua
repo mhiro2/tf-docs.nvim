@@ -590,4 +590,49 @@ T["TfDocOpen maps unresolved reason to user-facing message"] = function()
   expect.equality(logs[1].msg, "Unable to infer provider from resource/data type under cursor")
 end
 
+T["TfDocOpen still opens but notifies (info) when a version fallback is used"] = function()
+  H.reset_state()
+  local plugin = require("tf-docs")
+  local log = require("tf-docs.log")
+  local resolver = require("tf-docs.resolver")
+  local ui = require("tf-docs.ui")
+
+  plugin.setup()
+
+  local opened_url
+  local logs = {}
+  H.with_patches({
+    {
+      target = resolver,
+      key = "resolve",
+      value = function()
+        return "https://example.com/fallback",
+          { url = "https://example.com/fallback", reason = "lockfile-version-missing" }
+      end,
+    },
+    {
+      target = ui,
+      key = "open",
+      value = function(url)
+        opened_url = url
+        return true
+      end,
+    },
+    {
+      target = log,
+      key = "log",
+      value = function(_, level, msg)
+        table.insert(logs, { level = level, msg = msg })
+      end,
+    },
+  }, function()
+    vim.api.nvim_cmd({ cmd = "TfDocOpen" }, {})
+  end)
+
+  expect.equality(opened_url, "https://example.com/fallback")
+  expect.equality(#logs, 1)
+  expect.equality(logs[1].level, "info")
+  expect.equality(logs[1].msg:find("fallback version") ~= nil, true)
+end
+
 return T

@@ -15,6 +15,7 @@ local autocmd_group = "tf-docs.nvim"
 local function clear_runtime_cache()
   cache.clear()
   lockfile.clear_meta()
+  ts.clear_context_cache()
 end
 
 ---@type table<string, string>
@@ -25,8 +26,16 @@ local unresolved_reason_messages = {
   ["provider-unresolved"] = "Unable to infer provider from resource/data type under cursor",
   ["url-unresolved"] = "Unable to build Terraform docs URL from current context",
   ["list-context-unresolved"] = "Unable to resolve context for the selected terraform block",
-  ["lockfile-version-missing"] = "Provider version is missing in .terraform.lock.hcl",
-  ["lockfile-version-multiple"] = "Provider has multiple version entries in .terraform.lock.hcl",
+}
+
+-- Reasons for which the resolver still returns a usable (fallback) URL. These
+-- are surfaced as info-level notices whenever a docs URL is resolved (open /
+-- copy / list), rather than as unresolved errors. The wording is action-neutral
+-- because the same resolution backs both open and copy_url.
+---@type table<string, string>
+local version_fallback_messages = {
+  ["lockfile-version-missing"] = "Using fallback version: provider version is missing in .terraform.lock.hcl",
+  ["lockfile-version-multiple"] = "Using the first version entry: provider has multiple version entries in .terraform.lock.hcl",
 }
 
 ---@param trace TfDocsTrace|{ reason?: string, error?: string }|nil
@@ -83,6 +92,17 @@ local function notify_unresolved(trace)
   log.log(cfg, "warn", format_unresolved_message(trace))
 end
 
+---Notify (info) when a docs URL was resolved with a version fallback, so the
+---user knows the URL may not point at an exact lockfile-pinned version.
+---@param trace TfDocsTrace|{ reason?: string }|nil
+local function notify_version_fallback(trace)
+  local reason = trace and trace.reason or nil
+  local msg = reason and version_fallback_messages[reason] or nil
+  if msg then
+    log.log(config.get(), "info", msg)
+  end
+end
+
 ---Resolve the symbol under the cursor, refine its slug via the Registry (with a
 ---heuristic fallback on timeout/failure), then hand the final URL to `sink`.
 ---@param bufnr number|nil
@@ -93,6 +113,7 @@ local function with_resolved_url(bufnr, sink)
     notify_unresolved(trace)
     return
   end
+  notify_version_fallback(trace)
   registry.resolve_url(trace, url, sink)
 end
 
@@ -171,6 +192,7 @@ function M.list(bufnr)
       return
     end
 
+    notify_version_fallback(trace)
     registry.resolve_url(trace, url, function(final_url)
       ui.open(final_url)
     end)
@@ -198,11 +220,11 @@ local function create_commands()
 
   vim.api.nvim_create_user_command("TfDocOpen", function()
     M.open(0)
-  end, {})
+  end, { desc = "tf-docs: open Terraform Registry docs for the symbol under the cursor" })
 
   vim.api.nvim_create_user_command("TfDocCopyUrl", function()
     M.copy_url(0)
-  end, {})
+  end, { desc = "tf-docs: copy the docs URL for the symbol under the cursor" })
 
   vim.api.nvim_create_user_command("TfDocDebug", function()
     local _, trace = resolve_safe(0)
@@ -219,11 +241,11 @@ local function create_commands()
       string.format("  reason: %s", trace.reason or "(none)"),
     }
     log.log_force("info", table.concat(info, "\n"))
-  end, {})
+  end, { desc = "tf-docs: print the resolution trace for the symbol under the cursor" })
 
   vim.api.nvim_create_user_command("TfDocPeek", function()
     M.peek(0)
-  end, {})
+  end, { desc = "tf-docs: preview the resolved docs URL and trace in a float" })
 
   vim.api.nvim_create_user_command("TfDocVersion", function()
     local cfg = config.get()
@@ -241,15 +263,15 @@ local function create_commands()
     local has_lockfile = stat ~= nil and stat.type == "file"
 
     ui.show_versions(versions, root, meta, has_lockfile)
-  end, {})
+  end, { desc = "tf-docs: show provider versions resolved from .terraform.lock.hcl" })
 
   vim.api.nvim_create_user_command("TfDocClearCache", function()
     M.clear_cache()
-  end, {})
+  end, { desc = "tf-docs: clear internal resolution caches" })
 
   vim.api.nvim_create_user_command("TfDocList", function()
     M.list(0)
-  end, {})
+  end, { desc = "tf-docs: list resource/data/module blocks and open docs for a choice" })
 
   commands_created = true
 end
@@ -262,6 +284,7 @@ local function create_autocmds()
     callback = function(args)
       if args and type(args.buf) == "number" and args.buf > 0 then
         cache.clear_buf(args.buf)
+        ts.clear_buf_context(args.buf)
       end
     end,
   })
