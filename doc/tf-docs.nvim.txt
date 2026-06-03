@@ -124,12 +124,14 @@ To route tf-docs -> LSP hover when docs aren't available:
           - provider source (namespace/name)
           - provider version
           - anchor (if applicable)
-          - final URL
+          - URL (resolved synchronously: reflects the registry-corrected slug
+            only when already cached; see
+            |tf-docs.nvim-enable_registry_lookup|, otherwise the heuristic URL)
           - reason (if resolution failed)
 
 :TfDocPeek                                                   *:TfDocPeek*
         Show a lightweight "peek" UI with resolved URL and trace in a
-        floating window.
+        floating window. Same synchronous URL behavior as :TfDocDebug.
 
 :TfDocList                                                   *:TfDocList*
         List all resources/data sources/modules in the current buffer and
@@ -226,6 +228,10 @@ Default config:
     -- Module docs (best-effort)
     enable_module_docs = true,
 
+    -- Resolve the real docs slug via the Terraform Registry API (needs curl)
+    enable_registry_lookup = true,
+    registry_timeout_ms = 1500,
+
     -- UI backend for selection (e.g., :TfDocList)
     ui_select_backend = "auto", -- "auto" | "builtin"
 
@@ -279,6 +285,25 @@ enable_module_docs                           *tf-docs.nvim-enable_module_docs*
         If a URL can't be built, module resolution is treated as "unresolved".
         Only http(s) URLs are opened; any other scheme is refused.
 
+enable_registry_lookup                   *tf-docs.nvim-enable_registry_lookup*
+        The registry doc-page slug is the filename the provider authors chose,
+        not a deterministic transform of the type. Most resources drop the
+        provider prefix (google_compute_instance -> "compute_instance") but some
+        keep it (google_service_account -> "google_service_account"), and a
+        resource and data source of the same name can differ.
+        When enabled (default), tf-docs queries the Terraform Registry API for
+        the real slug (trying the prefix-stripped slug first, then the full type
+        name) and caches it for the session. If the API does not answer within
+        registry_timeout_ms, it falls back to the prefix-stripping heuristic so
+        opening docs never blocks; the network result still backfills the cache.
+        Requires curl and only applies to public registry "namespace/name"
+        sources. Set to false to always use the offline heuristic.
+
+registry_timeout_ms                         *tf-docs.nvim-registry_timeout_ms*
+        Max milliseconds to wait for the Registry API before falling back to the
+        heuristic slug. Default is 1500. Only relevant on a cold cache; warm
+        cache hits resolve instantly.
+
 ui_select_backend                          *tf-docs.nvim-ui_select_backend*
         UI backend for selection (e.g., :TfDocList):
           - "auto": use external UI plugins if available (telescope-ui-select,
@@ -303,6 +328,9 @@ For a type like `google_compute_instance`:
 4. Resolve provider version from .terraform.lock.hcl.
 5. Build Terraform Registry URL.
 6. Optionally append anchor if allowlisted.
+7. If enable_registry_lookup is on, resolve the real docs slug via the
+   Registry API (see |tf-docs.nvim-enable_registry_lookup|), falling back to
+   the prefix-stripping heuristic on timeout/failure.
 
 Fallbacks:
   - If required_providers is missing: use default_namespace

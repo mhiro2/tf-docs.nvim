@@ -7,6 +7,8 @@
 ---@field anchor_providers_allowlist string[]
 ---@field provider_overrides table<string, string>
 ---@field enable_module_docs boolean
+---@field enable_registry_lookup boolean
+---@field registry_timeout_ms number
 ---@field log_level string
 ---@field ui_select_backend "auto"|"builtin"
 
@@ -22,6 +24,8 @@
 ---@field anchor_providers_allowlist? string[]
 ---@field provider_overrides? table<string, string>
 ---@field enable_module_docs? boolean
+---@field enable_registry_lookup? boolean
+---@field registry_timeout_ms? number
 ---@field log_level? "debug"|"info"|"warn"|"error"
 ---@field ui_select_backend? "auto"|"builtin"
 
@@ -122,6 +126,21 @@ local function validate(cfg)
     cfg.enable_module_docs = default_config.enable_module_docs
   end
 
+  if type(cfg.enable_registry_lookup) ~= "boolean" then
+    warn("tf-docs.nvim: enable_registry_lookup must be boolean (fallback to default)")
+    cfg.enable_registry_lookup = default_config.enable_registry_lookup
+  end
+
+  -- Must be a finite, >= 1 ms value; it is handed to libuv's timer:start(),
+  -- which expects a non-negative integer. NaN (t ~= t) and +inf are rejected.
+  local timeout = cfg.registry_timeout_ms
+  if type(timeout) ~= "number" or timeout ~= timeout or timeout == math.huge or timeout < 1 then
+    warn("tf-docs.nvim: registry_timeout_ms must be a finite number of milliseconds >= 1 (fallback to default)")
+    cfg.registry_timeout_ms = default_config.registry_timeout_ms
+  else
+    cfg.registry_timeout_ms = math.floor(timeout)
+  end
+
   local valid_backends = { auto = true, builtin = true }
   if not valid_backends[cfg.ui_select_backend] then
     warn(
@@ -146,6 +165,8 @@ default_config = {
   anchor_providers_allowlist = { "hashicorp/aws", "hashicorp/google", "hashicorp/azurerm" },
   provider_overrides = {},
   enable_module_docs = true,
+  enable_registry_lookup = true,
+  registry_timeout_ms = 1500,
   log_level = "warn",
   ui_select_backend = "auto",
 }

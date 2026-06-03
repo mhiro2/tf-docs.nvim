@@ -2,6 +2,7 @@ local config = require("tf-docs.config")
 local cache = require("tf-docs.cache")
 local lockfile = require("tf-docs.lockfile")
 local log = require("tf-docs.log")
+local registry = require("tf-docs.registry")
 local resolver = require("tf-docs.resolver")
 local ui = require("tf-docs.ui")
 local ts = require("tf-docs.ts")
@@ -62,6 +63,17 @@ local function resolve_safe(bufnr, opts)
     log.log(cfg, "error", string.format("tf-docs.nvim: unexpected error: %s", tostring(url_or_err)))
     return nil, { reason = "exception", error = tostring(url_or_err) }
   end
+  -- Upgrade to the registry-corrected URL when its slug is already cached, so
+  -- the synchronous entry points (resolve/peek/debug) match what open/copy_url
+  -- actually open on a warm cache. Cold-cache correction stays async (open/
+  -- copy_url/list), since this path must not block.
+  if url_or_err and trace then
+    local upgraded = registry.resolve_cached_url(trace, url_or_err)
+    if upgraded ~= url_or_err then
+      url_or_err = upgraded
+      trace.url = upgraded
+    end
+  end
   return url_or_err, trace
 end
 
@@ -69,6 +81,19 @@ end
 local function notify_unresolved(trace)
   local cfg = config.get()
   log.log(cfg, "warn", format_unresolved_message(trace))
+end
+
+---Resolve the symbol under the cursor, refine its slug via the Registry (with a
+---heuristic fallback on timeout/failure), then hand the final URL to `sink`.
+---@param bufnr number|nil
+---@param sink fun(url: string)
+local function with_resolved_url(bufnr, sink)
+  local url, trace = resolve_safe(bufnr or 0)
+  if not url then
+    notify_unresolved(trace)
+    return
+  end
+  registry.resolve_url(trace, url, sink)
 end
 
 -- ============================================================================
@@ -82,23 +107,17 @@ end
 ---Resolve the symbol under the cursor and open its Terraform Registry docs.
 ---@param bufnr? number Buffer to resolve (defaults to the current buffer).
 function M.open(bufnr)
-  local url, trace = resolve_safe(bufnr or 0)
-  if not url then
-    notify_unresolved(trace)
-    return
-  end
-  ui.open(url)
+  with_resolved_url(bufnr, function(url)
+    ui.open(url)
+  end)
 end
 
 ---Resolve the symbol under the cursor and copy its docs URL to the clipboard.
 ---@param bufnr? number Buffer to resolve (defaults to the current buffer).
 function M.copy_url(bufnr)
-  local url, trace = resolve_safe(bufnr or 0)
-  if not url then
-    notify_unresolved(trace)
-    return
-  end
-  ui.copy(url)
+  with_resolved_url(bufnr, function(url)
+    ui.copy(url)
+  end)
 end
 
 ---Show the resolved URL and trace for the symbol under the cursor in a float.
@@ -152,7 +171,9 @@ function M.list(bufnr)
       return
     end
 
-    ui.open(url)
+    registry.resolve_url(trace, url, function(final_url)
+      ui.open(final_url)
+    end)
   end)
 end
 

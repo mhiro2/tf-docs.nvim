@@ -119,9 +119,13 @@ Now place the cursor inside a Terraform block and press `gK` (or `K` if you opte
 * `:TfDocCopyUrl`
   Resolve and copy the URL to your clipboard.
 * `:TfDocDebug`
-  Print a resolution trace (root, provider source/version, kind/type, final URL).
+  Print a resolution trace (root, provider source/version, kind/type, URL). The
+  URL is resolved synchronously, so it reflects the registry-corrected slug only
+  when it is already cached (see [How the docs slug is resolved](#how-the-docs-slug-is-resolved));
+  otherwise it shows the heuristic URL.
 * `:TfDocPeek`
-  Show a lightweight "peek" UI (resolved URL + trace) in a floating window.
+  Show a lightweight "peek" UI (resolved URL + trace) in a floating window. Same
+  synchronous behavior as `:TfDocDebug` regarding the slug.
 * `:TfDocList`
   List all resources/data sources/modules in the current buffer. Select one to open its documentation.
 * `:TfDocVersion`
@@ -149,6 +153,9 @@ tf.clear_cache() -- clear internal caches (root/provider/lockfile resolution)
 -- resolve() returns the URL (or nil) and a trace without opening a browser
 -- or showing the "unresolved" notification, so callers can route the result
 -- themselves (e.g. K between tf-docs and LSP hover; see Installation).
+-- It is synchronous: the URL carries the registry-corrected slug only when
+-- that slug is already cached, otherwise the heuristic URL. open/copy_url/list
+-- additionally perform the (async) registry lookup before acting.
 local url, trace = tf.resolve()
 ```
 
@@ -178,6 +185,19 @@ require("tf-docs").setup({
   -- Override inferred provider name.
   -- Example: { google-beta = "google" }
   provider_overrides = {},
+
+  -- Resolve the real docs slug via the Terraform Registry API.
+  --
+  -- The registry doc-page slug is the filename the provider authors chose, not a
+  -- deterministic transform of the type: most hashicorp/google resources drop the
+  -- prefix (google_compute_instance -> "compute_instance") but some keep it
+  -- (google_service_account -> "google_service_account"), and resource vs data
+  -- source can differ. When enabled, tf-docs asks the registry for the real slug,
+  -- caches it for the session, and only falls back to the prefix-stripping
+  -- heuristic if the API does not answer within `registry_timeout_ms`.
+  -- Requires `curl`. Set to false to always use the (offline) heuristic.
+  enable_registry_lookup = true,
+  registry_timeout_ms = 1500,
 
   -- Module docs (best-effort)
   --
@@ -216,6 +236,26 @@ Fallbacks:
 
 * If `required_providers` is missing: `hashicorp/<provider>` (configurable)
 * If lockfile is missing: `latest` (configurable)
+
+### How the docs slug is resolved
+
+The last path segment of a docs URL (the "slug") is **not** a deterministic
+transform of the resource/data type — it is the documentation filename the
+provider authors chose. Most resources drop the provider prefix
+(`google_compute_instance` → `compute_instance`), but some keep it
+(`google_service_account` → `google_service_account`), and the same name can
+differ between a resource and a data source.
+
+With `enable_registry_lookup = true` (default), tf-docs asks the Terraform
+Registry API for the real slug, trying the prefix-stripped slug first and then
+the full type name, and caches the answer for the session. If the API does not
+respond within `registry_timeout_ms`, it falls back to the prefix-stripping
+heuristic so opening docs never blocks — the network result still backfills the
+cache, so the next open for that provider version is instant and correct.
+
+This requires `curl` and only applies to the public Terraform Registry
+(`namespace/name` sources). Set `enable_registry_lookup = false` to always use
+the offline heuristic.
 
 ### Provider hints and overrides
 

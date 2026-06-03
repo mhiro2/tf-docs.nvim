@@ -33,6 +33,18 @@ function M.data_url(source, version, type_name, type_prefix)
   return M.provider_base(source, version) .. "/data-sources/" .. data_name
 end
 
+---Build a docs URL from an explicit, already-resolved slug. Unlike
+---resource_url/data_url, this does NOT strip the provider prefix, so it can
+---express slugs that keep it (e.g. hashicorp/google's `google_service_account`).
+---@param source string
+---@param version string
+---@param category string "resources" | "data-sources"
+---@param slug string
+---@return string
+function M.docs_url(source, version, category, slug)
+  return M.provider_base(source, version) .. "/" .. category .. "/" .. slug
+end
+
 ---@param source string
 ---@return string|nil
 function M.module_url(source)
