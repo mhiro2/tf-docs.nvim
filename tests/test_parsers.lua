@@ -42,7 +42,7 @@ terraform {
   expect.equality(result.google, "hashicorp/google")
 end
 
-T["required_providers ignores braces in strings/comments and merges multiple blocks"] = function()
+T["required_providers ignores strings comments and heredocs and merges multiple blocks"] = function()
   H.reset_state()
   local parser = require("tf-docs.required_providers")
   local text = [[
@@ -61,6 +61,10 @@ terraform {
     aws = "hashicorp/aws" // inline should override (same value here)
     google = {
       // comment with braces { } should not break
+      note = <<-EOT
+        source = "example/false"
+      }
+      EOT
       source = "hashicorp/google"
     }
   }

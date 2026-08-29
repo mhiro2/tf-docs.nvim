@@ -12,6 +12,7 @@ local M = {}
 ---@field kind string|nil
 ---@field type string|nil
 ---@field module_source string|nil
+---@field module_source_reason string|nil
 ---@field provider string|nil
 ---@field provider_source string|nil
 ---@field provider_version string|nil
@@ -70,6 +71,7 @@ function M.resolve(bufnr, opts)
   trace.kind = context.kind
   trace.type = context.type
   trace.module_source = context.module_source
+  trace.module_source_reason = context.module_source_reason
   trace.anchor = context.anchor_candidate
 
   if context.kind == "module" then
@@ -80,7 +82,7 @@ function M.resolve(bufnr, opts)
 
     local module_url = url.module_url(context.module_source or "")
     if not module_url then
-      trace.reason = "module-source-unresolved"
+      trace.reason = context.module_source_reason or "module-source-unresolved"
       return nil, trace
     end
 

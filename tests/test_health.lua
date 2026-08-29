@@ -134,7 +134,7 @@ T["health.check warns when optional treesitter parser is unavailable"] = functio
   expect.equality(calls[1].fn, "ok")
   expect.equality(calls[2].fn, "ok")
   expect.equality(calls[3].fn, "warn")
-  expect.equality(calls[3].msg, "treesitter parser not detected; tf-docs will use line-based fallback parsing")
+  expect.equality(calls[3].msg, "treesitter parser not detected; tf-docs will use the built-in HCL structure scanner")
 end
 
 return T

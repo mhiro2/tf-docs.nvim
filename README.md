@@ -50,7 +50,7 @@ This is designed to eliminate repeated Google searches and reduce context switch
 - Neovim **0.12+**
 - Terraform/HCL Treesitter parser(s) are optional
   - If available, tf-docs uses Treesitter for more accurate cursor context detection
-  - Without them, tf-docs falls back to built-in line-based parsing
+  - Without them, tf-docs falls back to a built-in stateful HCL structure scanner
 
 No external commands are required for the default workflow.
 
@@ -208,6 +208,8 @@ require("tf-docs").setup({
   -- - VCS/URL sources: "https://...", "ssh://git@...", "git@host:org/repo" are
   --   normalized to a browsable "https://host/org/repo" (the git:: prefix,
   --   "?ref=" query, "//subdir", and trailing ".git" are stripped).
+  -- The source must be a direct, static quoted literal. Input-variable, local,
+  -- and other expressions are reported as unresolved instead of being guessed.
   -- If it can't build a URL, it falls back to "unresolved".
   -- Only http(s) URLs are opened; any other scheme is refused.
   enable_module_docs = true,

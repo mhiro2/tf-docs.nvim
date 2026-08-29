@@ -211,7 +211,7 @@ T["TfDocList resolves selected item without moving cursor"] = function()
         key = "list_resources",
         value = function()
           return {
-            { kind = "resource", type = "aws_ami", name = "y", line = 4 },
+            { kind = "resource", type = "aws_ami", name = "y", line = 4, col = 6 },
           }
         end,
       },
@@ -220,6 +220,7 @@ T["TfDocList resolves selected item without moving cursor"] = function()
         key = "get_context",
         value = function(_, cursor_pos)
           expect.equality(cursor_pos[1], 4)
+          expect.equality(cursor_pos[2], 6)
           return { kind = "resource", type = "aws_ami", anchor_candidate = nil }
         end,
       },
@@ -283,7 +284,7 @@ T["TfDocList does not resolve when selection is cancelled"] = function()
         key = "list_resources",
         value = function()
           return {
-            { kind = "resource", type = "aws_instance", name = "x", line = 1 },
+            { kind = "resource", type = "aws_instance", name = "x", line = 1, col = 0 },
           }
         end,
       },
