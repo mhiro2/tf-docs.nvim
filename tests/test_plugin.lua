@@ -4,6 +4,106 @@ local H = require("tests.helpers")
 local T = MiniTest.new_set()
 local expect = MiniTest.expect
 
+---@param mutate fun(source_buf: number)
+---@param expected_message string
+local function expect_stale_list_abort(mutate, expected_message)
+  H.reset_state()
+  local log = require("tf-docs.log")
+  local plugin = require("tf-docs")
+  local resolver = require("tf-docs.resolver")
+  local ts = require("tf-docs.ts")
+  local ui = require("tf-docs.ui")
+
+  plugin.setup()
+
+  local context_calls = 0
+  local resolve_calls = 0
+  local open_calls = 0
+  local notifications = {}
+
+  H.with_scratch_buf({
+    lines = {
+      'resource "aws_instance" "source" {',
+      "}",
+    },
+  }, function(source_buf)
+    H.with_scratch_buf({
+      lines = {
+        'resource "google_compute_instance" "other" {',
+        "}",
+      },
+    }, function(other_buf)
+      local selected
+      local on_choice
+
+      H.with_patches({
+        {
+          target = ts,
+          key = "list_resources",
+          value = function(bufnr)
+            expect.equality(bufnr, source_buf)
+            return {
+              { kind = "resource", type = "aws_instance", name = "source", line = 1 },
+            }
+          end,
+        },
+        {
+          target = ts,
+          key = "get_context",
+          value = function()
+            context_calls = context_calls + 1
+            return { kind = "resource", type = "aws_instance", anchor_candidate = nil }
+          end,
+        },
+        {
+          target = resolver,
+          key = "resolve",
+          value = function()
+            resolve_calls = resolve_calls + 1
+            return "https://example.com/source", { url = "https://example.com/source" }
+          end,
+        },
+        {
+          target = ui,
+          key = "select",
+          value = function(items, _, callback)
+            selected = items[1]
+            on_choice = callback
+          end,
+        },
+        {
+          target = ui,
+          key = "open",
+          value = function()
+            open_calls = open_calls + 1
+            return true
+          end,
+        },
+        {
+          target = log,
+          key = "log",
+          value = function(_, level, message)
+            table.insert(notifications, { level = level, message = message })
+          end,
+        },
+      }, function()
+        vim.api.nvim_set_current_buf(source_buf)
+        vim.api.nvim_cmd({ cmd = "TfDocList" }, {})
+        expect.equality(type(on_choice), "function")
+
+        vim.api.nvim_set_current_buf(other_buf)
+        mutate(source_buf)
+        on_choice(selected)
+      end)
+    end)
+  end)
+
+  expect.equality(context_calls, 0)
+  expect.equality(resolve_calls, 0)
+  expect.equality(open_calls, 0)
+  expect.equality(notifications, { { level = "warn", message = expected_message } })
+end
+
 T["setup rebuilds BufWritePost patterns on reconfigure"] = function()
   H.reset_state()
   local plugin = require("tf-docs")
@@ -33,6 +133,97 @@ T["setup rebuilds BufWritePost patterns on reconfigure"] = function()
   expect.equality(second_patterns[".terraform.lock.hcl"], true)
 end
 
+T["public resolution keeps root and context caches scoped to concrete buffers"] = function()
+  H.reset_state()
+  local cache = require("tf-docs.cache")
+  local plugin = require("tf-docs")
+
+  plugin.setup({ root_markers = { "terraform.tf" } })
+
+  local first_file = H.fixture_path("root_marker", "subdir", "foo.tf")
+  local second_file = H.fixture_path("root_priority", "subdir", "main.tf")
+  local first_root = H.fixture_path("root_marker")
+  local second_root = H.fixture_path("root_priority", "subdir")
+
+  H.with_no_treesitter(function()
+    H.with_scratch_buf({
+      name = first_file,
+      lines = {
+        'resource "aws_instance" "first" {',
+        '  ami = "ami-first"',
+        "}",
+      },
+      cursor = { 2, 2 },
+    }, function(first_buf)
+      local _, first_trace = plugin.resolve()
+
+      H.with_scratch_buf({
+        name = second_file,
+        lines = {
+          'data "google_compute_image" "second" {',
+          '  family = "debian"',
+          "}",
+        },
+        cursor = { 2, 2 },
+      }, function(second_buf)
+        expect.equality(vim.api.nvim_buf_get_changedtick(first_buf), vim.api.nvim_buf_get_changedtick(second_buf))
+
+        local _, second_trace = plugin.resolve(0)
+
+        expect.equality(first_trace.root, first_root)
+        expect.equality(first_trace.kind, "resource")
+        expect.equality(first_trace.type, "aws_instance")
+        expect.equality(second_trace.root, second_root)
+        expect.equality(second_trace.kind, "data")
+        expect.equality(second_trace.type, "google_compute_image")
+        expect.equality(cache.get_root(first_buf), first_root)
+        expect.equality(cache.get_root(second_buf), second_root)
+        expect.equality(cache.get_root(0), nil)
+      end)
+    end)
+  end)
+end
+
+T["buffer lifecycle autocmds invalidate only the event buffer"] = function()
+  H.reset_state()
+  local cache = require("tf-docs.cache")
+  local plugin = require("tf-docs")
+  local ts = require("tf-docs.ts")
+
+  plugin.setup()
+
+  H.with_scratch_buf({}, function(first_buf)
+    H.with_scratch_buf({}, function(second_buf)
+      cache.set_root(first_buf, "/tmp/first")
+      cache.set_root(second_buf, "/tmp/second")
+
+      local context_clears = {}
+      H.with_patches({
+        {
+          target = ts,
+          key = "clear_buf_context",
+          value = function(bufnr)
+            table.insert(context_clears, bufnr)
+          end,
+        },
+      }, function()
+        vim.api.nvim_exec_autocmds("BufFilePost", { buffer = first_buf })
+
+        expect.equality(cache.get_root(first_buf), nil)
+        expect.equality(cache.get_root(second_buf), "/tmp/second")
+
+        cache.set_root(first_buf, "/tmp/first")
+        vim.api.nvim_exec_autocmds("BufWipeout", { buffer = second_buf })
+
+        expect.equality(cache.get_root(first_buf), "/tmp/first")
+        expect.equality(cache.get_root(second_buf), nil)
+      end)
+
+      expect.equality(context_clears, { first_buf, second_buf })
+    end)
+  end)
+end
+
 T["TfDocOpen calls ui.open with resolved URL"] = function()
   H.reset_state()
   local plugin = require("tf-docs")
@@ -42,11 +233,13 @@ T["TfDocOpen calls ui.open with resolved URL"] = function()
   plugin.setup()
 
   local opened_url
+  local expected_buf = vim.api.nvim_get_current_buf()
   H.with_patches({
     {
       target = resolver,
       key = "resolve",
-      value = function()
+      value = function(bufnr)
+        expect.equality(bufnr, expected_buf)
         return "https://example.com/open", { url = "https://example.com/open" }
       end,
     },
@@ -74,11 +267,13 @@ T["TfDocCopyUrl calls ui.copy with resolved URL"] = function()
   plugin.setup()
 
   local copied_url
+  local expected_buf = vim.api.nvim_get_current_buf()
   H.with_patches({
     {
       target = resolver,
       key = "resolve",
-      value = function()
+      value = function(bufnr)
+        expect.equality(bufnr, expected_buf)
         return "https://example.com/copy", { url = "https://example.com/copy" }
       end,
     },
@@ -105,11 +300,13 @@ T["TfDocPeek passes trace to ui.peek"] = function()
   plugin.setup()
 
   local captured_trace
+  local expected_buf = vim.api.nvim_get_current_buf()
   H.with_patches({
     {
       target = resolver,
       key = "resolve",
-      value = function()
+      value = function(bufnr)
+        expect.equality(bufnr, expected_buf)
         return "https://example.com/peek",
           {
             root = "/tmp/root",
@@ -146,11 +343,13 @@ T["TfDocDebug outputs trace fields"] = function()
 
   local captured_level
   local captured_msg
+  local expected_buf = vim.api.nvim_get_current_buf()
   H.with_patches({
     {
       target = resolver,
       key = "resolve",
-      value = function()
+      value = function(bufnr)
+        expect.equality(bufnr, expected_buf)
         return "https://example.com/debug",
           {
             root = "/tmp/root",
@@ -256,6 +455,105 @@ T["TfDocList resolves selected item without moving cursor"] = function()
     expect.equality(opened_url, "https://example.com/docs")
     expect.equality(vim.api.nvim_win_get_cursor(0), cursor_before)
   end)
+end
+
+T["TfDocList resolves its selection against the originating buffer"] = function()
+  H.reset_state()
+  local plugin = require("tf-docs")
+  local resolver = require("tf-docs.resolver")
+  local ts = require("tf-docs.ts")
+  local ui = require("tf-docs.ui")
+
+  plugin.setup()
+
+  H.with_scratch_buf({
+    lines = {
+      'resource "aws_instance" "source" {',
+      "}",
+    },
+  }, function(source_buf)
+    H.with_scratch_buf({
+      lines = {
+        'resource "google_compute_instance" "other" {',
+        "}",
+      },
+    }, function(other_buf)
+      local selected
+      local on_choice
+      local observed = {}
+      local opened_url
+
+      H.with_patches({
+        {
+          target = ts,
+          key = "list_resources",
+          value = function(bufnr)
+            observed.list = bufnr
+            return {
+              { kind = "resource", type = "aws_instance", name = "source", line = 1 },
+            }
+          end,
+        },
+        {
+          target = ts,
+          key = "get_context",
+          value = function(bufnr, cursor_pos)
+            observed.context = bufnr
+            expect.equality(cursor_pos, { 1, 0 })
+            return { kind = "resource", type = "aws_instance", anchor_candidate = nil }
+          end,
+        },
+        {
+          target = resolver,
+          key = "resolve",
+          value = function(bufnr, opts)
+            observed.resolve = bufnr
+            expect.equality(opts.context.type, "aws_instance")
+            return "https://example.com/source", { url = "https://example.com/source" }
+          end,
+        },
+        {
+          target = ui,
+          key = "select",
+          value = function(items, _, callback)
+            selected = items[1]
+            on_choice = callback
+          end,
+        },
+        {
+          target = ui,
+          key = "open",
+          value = function(url)
+            opened_url = url
+            return true
+          end,
+        },
+      }, function()
+        vim.api.nvim_set_current_buf(source_buf)
+        vim.api.nvim_cmd({ cmd = "TfDocList" }, {})
+
+        vim.api.nvim_set_current_buf(other_buf)
+        on_choice(selected)
+      end)
+
+      expect.equality(observed.list, source_buf)
+      expect.equality(observed.context, source_buf)
+      expect.equality(observed.resolve, source_buf)
+      expect.equality(opened_url, "https://example.com/source")
+    end)
+  end)
+end
+
+T["TfDocList aborts when the originating buffer is wiped while selecting"] = function()
+  expect_stale_list_abort(function(source_buf)
+    vim.api.nvim_buf_delete(source_buf, { force = true })
+  end, "The Terraform buffer was closed while selecting; run :TfDocList again")
+end
+
+T["TfDocList aborts when the originating buffer changes while selecting"] = function()
+  expect_stale_list_abort(function(source_buf)
+    vim.api.nvim_buf_set_lines(source_buf, 0, 1, false, { 'resource "aws_instance" "changed" {' })
+  end, "The Terraform buffer changed while selecting; run :TfDocList again")
 end
 
 T["TfDocList does not resolve when selection is cancelled"] = function()
@@ -366,11 +664,13 @@ T["TfDocVersion passes resolved values to UI"] = function()
   plugin.setup()
 
   local captured
+  local expected_buf = vim.api.nvim_get_current_buf()
   H.with_patches({
     {
       target = root,
       key = "get_root",
-      value = function()
+      value = function(bufnr)
+        expect.equality(bufnr, expected_buf)
         return "/tmp/project"
       end,
     },
