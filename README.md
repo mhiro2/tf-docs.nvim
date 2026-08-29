@@ -205,9 +205,11 @@ require("tf-docs").setup({
   --   module "x" { source = "..." }
   -- tf-docs tries to resolve a URL from `source`:
   -- - Terraform Registry modules: "namespace/name/provider" or "registry.terraform.io/..."
-  -- - VCS/URL sources: "https://...", "ssh://git@...", "git@host:org/repo" are
-  --   normalized to a browsable "https://host/org/repo" (the git:: prefix,
-  --   "?ref=" query, "//subdir", and trailing ".git" are stripped).
+  -- - VCS/URL sources: "https://...", "ssh://git@...", "git@host:org/repo",
+  --   "github.com/org/repo", and "bitbucket.org/org/repo" are normalized to a
+  --   browsable repository URL (the git:: prefix, "?ref=" query, "//subdir",
+  --   trailing ".git", and URL credentials are stripped).
+  -- Resolved URLs and traces never retain URL userinfo or query parameters.
   -- The source must be a direct, static quoted literal. Input-variable, local,
   -- and other expressions are reported as unresolved instead of being guessed.
   -- If it can't build a URL, it falls back to "unresolved".

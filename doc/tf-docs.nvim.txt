@@ -278,10 +278,12 @@ enable_module_docs                           *tf-docs.nvim-enable_module_docs*
               "namespace/name/provider"
               "registry.terraform.io/namespace/name/provider"
           - VCS/URL sources:
-              "https://...", "ssh://git@...", "git@host:org/repo"
-            are normalized to a browsable "https://host/org/repo" (the git::
-            prefix, "?ref=" query, "//subdir", and trailing ".git" are
-            stripped).
+              "https://...", "ssh://git@...", "git@host:org/repo",
+              "github.com/org/repo", "bitbucket.org/org/repo"
+            are normalized to a browsable repository URL (the git:: prefix,
+            "?ref=" query, "//subdir", trailing ".git", and URL credentials
+            are stripped). Resolved URLs and traces never retain URL userinfo
+            or query parameters.
         The source must be a direct, static quoted literal. Input-variable,
         local, and other expressions are reported as unresolved instead of
         being guessed.

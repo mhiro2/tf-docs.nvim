@@ -45,83 +45,160 @@ function M.docs_url(source, version, category, slug)
   return M.provider_base(source, version) .. "/" .. category .. "/" .. slug
 end
 
----@param source string
+local function strip_module_suffixes(source)
+  local cleaned = source:match("^[^?#]*") or source
+  local scheme_start = cleaned:find("://", 1, true)
+  local search_start = scheme_start and scheme_start + 3 or 1
+  local subdir_start = cleaned:find("//", search_start, true)
+  if subdir_start then
+    cleaned = cleaned:sub(1, subdir_start - 1)
+  end
+  return cleaned:gsub("%.git$", "")
+end
+
+---@param authority string
+---@param drop_port boolean
 ---@return string|nil
-function M.module_url(source)
-  if not source or source == "" then
+local function sanitize_authority(authority, drop_port)
+  local userinfo_end = authority:match("^.*()@")
+  if userinfo_end then
+    authority = authority:sub(userinfo_end + 1)
+  end
+  if authority == "" then
     return nil
   end
 
-  -- Best-effort cleanup for VCS module sources:
-  -- - strip the git:: forced-protocol prefix and any query (e.g. ?ref=...)
-  local cleaned = source:gsub("^git::", "")
-  cleaned = cleaned:gsub("%?.*$", "")
-
-  -- Drop the userinfo and port from a "[user@]host[:port]" authority, leaving
-  -- just the host. Userinfo is stripped up to the LAST '@' (matching how
-  -- browsers resolve "a@b@host"), so a crafted source cannot leave a
-  -- confusable "host@other" in the generated https URL.
-  local function host_only(authority)
-    return (authority:gsub("^.*@", ""):gsub(":%d+$", ""))
+  -- IP literals need a real IPv6 parser to validate safely. Hostname sources
+  -- cover the supported browsing workflow, so fail closed for bracketed hosts.
+  if authority:sub(1, 1) == "[" then
+    return nil
   end
 
-  -- Normalize non-browsable VCS schemes to https so vim.ui.open can open them.
-  -- ssh://[user@]host[:port]/path -> https://host/path
+  local port_digits = authority:match(":(%d+)$")
+  local port = ""
+  if port_digits then
+    local port_number = tonumber(port_digits)
+    if not port_number or port_number < 1 or port_number > 65535 then
+      return nil
+    end
+    port = ":" .. port_digits
+  end
+  local host = port == "" and authority or authority:sub(1, #authority - #port)
+  if
+    host == ""
+    or host:sub(1, 1) == "."
+    or host:sub(-1) == "."
+    or host:find("..", 1, true)
+    or not host:match("^[%w.-]+$")
+  then
+    return nil
+  end
+  return host .. (drop_port and "" or port)
+end
+
+---@param value string
+---@return boolean
+local function is_registry_segment(value)
+  return value ~= "" and value:match("^[%w-]+$") ~= nil
+end
+
+---@param value string
+---@return boolean
+local function is_vcs_path_segment(value)
+  return value ~= "" and value ~= "." and value ~= ".." and value:match("^[%w._-]+$") ~= nil
+end
+
+---@param source string
+---@return string|nil url
+---@return string|nil safe_source
+function M.module_url(source)
+  if type(source) ~= "string" or source == "" or source:find("[%z\1-\31\127%s]") then
+    return nil, nil
+  end
+
+  local cleaned = source:gsub("^git::", "", 1)
+  cleaned = cleaned:match("^[^?#]*") or cleaned
+
+  local scheme, http_rest = cleaned:match("^(https?)://(.+)$")
+  if scheme then
+    local authority, path = http_rest:match("^([^/]*)(/.*)$")
+    if not authority then
+      authority, path = http_rest, ""
+    end
+    authority = sanitize_authority(authority, false)
+    if not authority then
+      return nil, nil
+    end
+    cleaned = strip_module_suffixes(scheme .. "://" .. authority .. path)
+    return cleaned, cleaned
+  end
+
   local ssh_rest = cleaned:match("^ssh://(.+)$")
   if ssh_rest then
     local authority, path = ssh_rest:match("^([^/]*)(/.*)$")
     if not authority then
       authority, path = ssh_rest, ""
     end
-    cleaned = "https://" .. host_only(authority) .. path
+    authority = sanitize_authority(authority, true)
+    if not authority then
+      return nil, nil
+    end
+    cleaned = strip_module_suffixes("https://" .. authority .. path)
+    return cleaned, cleaned
   end
 
-  -- SCP-like syntax: user@host:org/repo -> https://host/org/repo. Require an
-  -- explicit userinfo '@' so we don't mistake a "host:port/path" registry
-  -- source for SCP syntax.
+  -- SCP-like syntax: user@host:org/repo -> https://host/org/repo. Requiring
+  -- userinfo keeps host:port/path registry-like sources out of this branch.
   if not cleaned:find("://", 1, true) and cleaned:find("@", 1, true) then
     local authority, path = cleaned:match("^([^/]+):(.+)$")
-    if authority then
-      cleaned = "https://" .. host_only(authority) .. "/" .. path
+    if not authority then
+      return nil, nil
     end
+    authority = sanitize_authority(authority, true)
+    if not authority then
+      return nil, nil
+    end
+    cleaned = strip_module_suffixes("https://" .. authority .. "/" .. path)
+    return cleaned, cleaned
   end
 
-  -- Drop Terraform subdir syntax (//subdir), preserving the scheme's "://".
-  local scheme_start = cleaned:find("://", 1, true)
-  if scheme_start then
-    local rest = cleaned:sub(scheme_start + 3)
-    local idx = rest:find("//", 1, true)
-    if idx then
-      cleaned = cleaned:sub(1, scheme_start + 2) .. rest:sub(1, idx - 1)
-    end
-  else
-    local idx = cleaned:find("//", 1, true)
-    if idx then
-      cleaned = cleaned:sub(1, idx - 1)
-    end
-  end
+  cleaned = strip_module_suffixes(cleaned)
 
-  -- Strip a trailing .git so the URL points at the browsable repo page.
-  cleaned = cleaned:gsub("%.git$", "")
-
-  if cleaned:match("^https?://") then
-    return cleaned
-  end
-
-  local ns, name, provider = cleaned:match("^([^/]+)/([^/]+)/([^/]+)$")
-  if ns and name and provider then
-    return string.format("https://registry.terraform.io/modules/%s/%s/%s", ns, name, provider)
+  -- Terraform recognizes these host shorthands as VCS sources. They must be
+  -- classified before the three-part public Registry shorthand.
+  local vcs_host, organization, repository = cleaned:match("^([^/]+)/([^/]+)/([^/]+)$")
+  if
+    (vcs_host == "github.com" or vcs_host == "bitbucket.org")
+    and is_vcs_path_segment(organization)
+    and is_vcs_path_segment(repository)
+  then
+    local browse_url = string.format("https://%s/%s/%s", vcs_host, organization, repository)
+    return browse_url, cleaned
   end
 
   local registry = cleaned:match("^registry%.terraform%.io/(.+)$")
   if registry then
-    local ns2, name2, provider2 = registry:match("^([^/]+)/([^/]+)/([^/]+)$")
-    if ns2 and name2 and provider2 then
-      return string.format("https://registry.terraform.io/modules/%s/%s/%s", ns2, name2, provider2)
+    local namespace, name, provider = registry:match("^([^/]+)/([^/]+)/([^/]+)$")
+    if
+      is_registry_segment(namespace or "")
+      and is_registry_segment(name or "")
+      and is_registry_segment(provider or "")
+    then
+      return string.format("https://registry.terraform.io/modules/%s/%s/%s", namespace, name, provider), cleaned
     end
+    return nil, nil
   end
 
-  return nil
+  local namespace, name, provider = cleaned:match("^([^/]+)/([^/]+)/([^/]+)$")
+  if
+    is_registry_segment(namespace or "")
+    and is_registry_segment(name or "")
+    and is_registry_segment(provider or "")
+  then
+    return string.format("https://registry.terraform.io/modules/%s/%s/%s", namespace, name, provider), cleaned
+  end
+
+  return nil, nil
 end
 
 ---@param url string

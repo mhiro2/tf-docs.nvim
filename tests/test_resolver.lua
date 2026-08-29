@@ -98,6 +98,39 @@ T["anchor allowlist OFF keeps URL without anchor"] = function()
   expect.equality(resolved_url, "https://registry.terraform.io/providers/hashicorp/aws/9.9.9/docs/resources/instance")
 end
 
+T["resolver redacts HTTP, SSH, and SCP credentials from module URL and trace"] = function()
+  H.reset_state()
+  local resolver = require("tf-docs.resolver")
+  local cases = {
+    {
+      source = "https://user:secret@example.com/org/repo.git?token=secret",
+      expected = "https://example.com/org/repo",
+    },
+    {
+      source = "git::ssh://user:secret@example.com:22/org/repo.git//module?token=secret",
+      expected = "https://example.com/org/repo",
+    },
+    {
+      source = "secret@example.com:org/repo.git//module?token=secret",
+      expected = "https://example.com/org/repo",
+    },
+  }
+
+  for _, case in ipairs(cases) do
+    local resolved_url, trace = resolver.resolve(0, {
+      context = {
+        kind = "module",
+        module_source = case.source,
+      },
+      root = nil,
+    })
+
+    expect.equality(resolved_url, case.expected)
+    expect.equality(trace.module_source, case.expected)
+    expect.equality(trace.url, case.expected)
+  end
+end
+
 T["integration: resolver.resolve() works end-to-end with root + ts.get_context"] = function()
   H.reset_state()
   local config = require("tf-docs.config")
