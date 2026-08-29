@@ -164,6 +164,59 @@ T["module_url keeps registry shorthand and resolves it"] = function()
     url.module_url("terraform-aws-modules/vpc/aws"),
     "https://registry.terraform.io/modules/terraform-aws-modules/vpc/aws"
   )
+  expect.equality(
+    url.module_url("registry.terraform.io/terraform-aws-modules/vpc/aws"),
+    "https://registry.terraform.io/modules/terraform-aws-modules/vpc/aws"
+  )
+end
+
+T["module_url recognizes GitHub and Bitbucket shorthands before Registry modules"] = function()
+  H.reset_state()
+  local url = require("tf-docs.url")
+  expect.equality(
+    url.module_url("github.com/hashicorp/example//modules/vpc?ref=v1.2.0"),
+    "https://github.com/hashicorp/example"
+  )
+  expect.equality(
+    url.module_url("bitbucket.org/hashicorp/example.git?ref=v1.2.0"),
+    "https://bitbucket.org/hashicorp/example"
+  )
+  expect.equality(url.module_url("example.com/hashicorp/example"), nil)
+end
+
+T["module_url removes HTTP credentials and query secrets"] = function()
+  H.reset_state()
+  local url = require("tf-docs.url")
+  local resolved, safe_source = url.module_url("https://user:secret@example.com/org/repo.git?token=secret")
+  expect.equality(resolved, "https://example.com/org/repo")
+  expect.equality(safe_source, "https://example.com/org/repo")
+  expect.equality(
+    url.module_url("http://user@example.com:8080/org/repo.git//modules/vpc?ref=v1"),
+    "http://example.com:8080/org/repo"
+  )
+  expect.equality(url.module_url("https://github.com@evil.example/org/repo.git"), "https://evil.example/org/repo")
+end
+
+T["module_url rejects malformed or unsafe authorities"] = function()
+  H.reset_state()
+  local url = require("tf-docs.url")
+  expect.equality(url.module_url("https://user@:443/org/repo.git"), nil)
+  expect.equality(url.module_url("https://example..com/org/repo.git"), nil)
+  expect.equality(url.module_url("https://example.com/org/repo.git\nsecret"), nil)
+  expect.equality(url.module_url("https://[2001:db8::1]/org/repo.git"), nil)
+  expect.equality(url.module_url("https://[....]/org/repo.git"), nil)
+  expect.equality(url.module_url("https://[:::]/org/repo.git"), nil)
+end
+
+T["module_url validates HTTP and SSH port boundaries"] = function()
+  H.reset_state()
+  local url = require("tf-docs.url")
+  expect.equality(url.module_url("https://example.com:65535/org/repo.git"), "https://example.com:65535/org/repo")
+  expect.equality(url.module_url("https://example.com:0/org/repo.git"), nil)
+  expect.equality(url.module_url("https://example.com:65536/org/repo.git"), nil)
+  expect.equality(url.module_url("ssh://git@example.com:65535/org/repo.git"), "https://example.com/org/repo")
+  expect.equality(url.module_url("ssh://git@example.com:0/org/repo.git"), nil)
+  expect.equality(url.module_url("ssh://git@example.com:65536/org/repo.git"), nil)
 end
 
 T["required_providers.resolve merges multiple files (later overrides earlier)"] = function()
