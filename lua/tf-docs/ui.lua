@@ -148,7 +148,8 @@ function M.peek(trace)
     "tf-docs.nvim",
     "",
     string.format("URL: %s", trace.url or "(unresolved)"),
-    string.format("Root: %s", trace.root or "(none)"),
+    string.format("Module directory: %s", trace.module_dir or "(none)"),
+    string.format("Workspace root: %s", trace.workspace_root or "(none)"),
     string.format("Kind: %s", trace.kind or "(none)"),
     string.format("Type: %s", trace.type or "(none)"),
     string.format("Module: %s", trace.module_source or "(none)"),
@@ -161,15 +162,15 @@ function M.peek(trace)
 end
 
 ---@param versions table<string, string>
----@param root string|nil
+---@param workspace_root string|nil
 ---@param meta table<string, TfDocsLockfileMeta>|nil
 ---@param has_lockfile boolean|nil
 ---@return string[]
-function M._build_versions_lines(versions, root, meta, has_lockfile)
+function M._build_versions_lines(versions, workspace_root, meta, has_lockfile)
   local lines = {
     "tf-docs.nvim - Provider Versions",
     "",
-    string.format("Root: %s", root or "(none)"),
+    string.format("Workspace root: %s", workspace_root or "(none)"),
   }
 
   local lockfile_note = has_lockfile and ".terraform.lock.hcl" or ".terraform.lock.hcl (missing)"
@@ -223,11 +224,11 @@ function M._build_versions_lines(versions, root, meta, has_lockfile)
 end
 
 ---@param versions table<string, string>
----@param root string|nil
+---@param workspace_root string|nil
 ---@param meta table<string, TfDocsLockfileMeta>|nil
 ---@param has_lockfile boolean|nil
-function M.show_versions(versions, root, meta, has_lockfile)
-  local lines = M._build_versions_lines(versions, root, meta, has_lockfile)
+function M.show_versions(versions, workspace_root, meta, has_lockfile)
+  local lines = M._build_versions_lines(versions, workspace_root, meta, has_lockfile)
   open_peek(lines, { filetype = "tf-docs" })
 end
 

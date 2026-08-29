@@ -61,4 +61,21 @@ T["config falls back for non-boolean enable_registry_lookup"] = function()
   expect.equality(config.setup({ enable_registry_lookup = "yes" }).enable_registry_lookup, true)
 end
 
+T["config accepts a scope resolver callback"] = function()
+  H.reset_state()
+  local config = require("tf-docs.config")
+  local callback = function()
+    return { module_dir = "/tmp/module" }
+  end
+
+  expect.equality(config.setup({ scope_resolver = callback }).scope_resolver, callback)
+end
+
+T["config rejects an invalid scope resolver"] = function()
+  H.reset_state()
+  local config = require("tf-docs.config")
+
+  expect.equality(config.setup({ scope_resolver = "/tmp/module" }).scope_resolver, nil)
+end
+
 return T

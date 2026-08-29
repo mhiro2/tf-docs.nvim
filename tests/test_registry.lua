@@ -137,6 +137,23 @@ T["resolve_url falls back synchronously when not applicable"] = function()
     end)
     expect.equality(got, "https://example.com/x")
 
+    -- Terraform built-ins use Developer documentation and never query the
+    -- provider Registry.
+    local builtin_url = "https://developer.hashicorp.com/terraform/language/resources/terraform-data"
+    got = nil
+    registry.resolve_url(
+      {
+        kind = "resource",
+        provider_source = "terraform.io/builtin/terraform",
+        type = "terraform_data",
+      },
+      builtin_url,
+      function(u)
+        got = u
+      end
+    )
+    expect.equality(got, builtin_url)
+
     -- custom-host source (not "namespace/name")
     got = nil
     registry.resolve_url(

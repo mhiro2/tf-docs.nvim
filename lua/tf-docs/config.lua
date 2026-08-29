@@ -1,8 +1,14 @@
+---@class TfDocsScopeOpts
+---@field module_dir? string
+---@field workspace_root? string
+
+---@alias TfDocsScopeResolver fun(bufnr: number): TfDocsScopeOpts|nil
+
 ---@class TfDocsConfig
 ---@field root_markers string[]
+---@field scope_resolver TfDocsScopeResolver|nil
 ---@field default_namespace string
 ---@field default_version string
----@field required_providers_files string[]
 ---@field enable_anchor boolean
 ---@field anchor_providers_allowlist string[]
 ---@field provider_overrides table<string, string>
@@ -17,9 +23,9 @@
 --- does not trigger LuaLS "missing fields" warnings.
 ---@class TfDocsOpts
 ---@field root_markers? string[]
+---@field scope_resolver? TfDocsScopeResolver
 ---@field default_namespace? string
 ---@field default_version? string
----@field required_providers_files? string[]
 ---@field enable_anchor? boolean
 ---@field anchor_providers_allowlist? string[]
 ---@field provider_overrides? table<string, string>
@@ -98,9 +104,9 @@ local function validate(cfg)
     cfg.root_markers = vim.deepcopy(default_config.root_markers)
   end
 
-  cfg.required_providers_files = sanitize_string_list(cfg.required_providers_files)
-  if #cfg.required_providers_files == 0 then
-    cfg.required_providers_files = vim.deepcopy(default_config.required_providers_files)
+  if cfg.scope_resolver ~= nil and type(cfg.scope_resolver) ~= "function" then
+    warn("tf-docs.nvim: scope_resolver must be a function or nil (fallback to automatic scope discovery)")
+    cfg.scope_resolver = nil
   end
 
   cfg.anchor_providers_allowlist = sanitize_string_list(cfg.anchor_providers_allowlist)
@@ -158,9 +164,9 @@ end
 
 default_config = {
   root_markers = { ".terraform.lock.hcl", "terraform.tf", "main.tf", ".git" },
+  scope_resolver = nil,
   default_namespace = "hashicorp",
   default_version = "latest",
-  required_providers_files = { "versions.tf", "providers.tf", "main.tf", "terraform.tf" },
   enable_anchor = true,
   anchor_providers_allowlist = { "hashicorp/aws", "hashicorp/google", "hashicorp/azurerm" },
   provider_overrides = {},

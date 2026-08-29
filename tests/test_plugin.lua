@@ -43,7 +43,7 @@ local function expect_stale_list_abort(mutate, expected_message)
           value = function(bufnr)
             expect.equality(bufnr, source_buf)
             return {
-              { kind = "resource", type = "aws_instance", name = "source", line = 1 },
+              { kind = "resource", type = "aws_instance", name = "source", line = 1, col = 0 },
             }
           end,
         },
@@ -104,46 +104,35 @@ local function expect_stale_list_abort(mutate, expected_message)
   expect.equality(notifications, { { level = "warn", message = expected_message } })
 end
 
-T["setup rebuilds BufWritePost patterns on reconfigure"] = function()
+T["setup watches every Terraform source format and the dependency lockfile"] = function()
   H.reset_state()
   local plugin = require("tf-docs")
 
-  plugin.setup({ required_providers_files = { "versions.tf" } })
-  local first_defs = vim.api.nvim_get_autocmds({ group = "tf-docs.nvim", event = "BufWritePost" })
-  local first_patterns = {}
-  for _, def in ipairs(first_defs) do
+  plugin.setup()
+  local definitions = vim.api.nvim_get_autocmds({ group = "tf-docs.nvim", event = "BufWritePost" })
+  local patterns = {}
+  for _, def in ipairs(definitions) do
     if type(def.pattern) == "string" and def.pattern ~= "" then
-      first_patterns[def.pattern] = true
+      patterns[def.pattern] = true
     end
   end
-  expect.equality(first_patterns["versions.tf"], true)
-  expect.equality(first_patterns["providers.tf"], nil)
-  expect.equality(first_patterns[".terraform.lock.hcl"], true)
-
-  plugin.setup({ required_providers_files = { "providers.tf" } })
-  local second_defs = vim.api.nvim_get_autocmds({ group = "tf-docs.nvim", event = "BufWritePost" })
-  local second_patterns = {}
-  for _, def in ipairs(second_defs) do
-    if type(def.pattern) == "string" and def.pattern ~= "" then
-      second_patterns[def.pattern] = true
-    end
-  end
-  expect.equality(second_patterns["versions.tf"], nil)
-  expect.equality(second_patterns["providers.tf"], true)
-  expect.equality(second_patterns[".terraform.lock.hcl"], true)
+  expect.equality(patterns["*.tf"], true)
+  expect.equality(patterns["*.tf.json"], true)
+  expect.equality(patterns[".terraform.lock.hcl"], true)
 end
 
-T["public resolution keeps root and context caches scoped to concrete buffers"] = function()
+T["public resolution keeps scopes and context keyed to concrete buffers"] = function()
   H.reset_state()
-  local cache = require("tf-docs.cache")
   local plugin = require("tf-docs")
 
   plugin.setup({ root_markers = { "terraform.tf" } })
 
   local first_file = H.fixture_path("root_marker", "subdir", "foo.tf")
   local second_file = H.fixture_path("root_priority", "subdir", "main.tf")
-  local first_root = H.fixture_path("root_marker")
-  local second_root = H.fixture_path("root_priority", "subdir")
+  local first_module = H.fixture_path("root_marker", "subdir")
+  local first_workspace = H.fixture_path("root_marker")
+  local second_module = H.fixture_path("root_priority", "subdir")
+  local second_workspace = H.fixture_path("root_priority", "subdir")
 
   H.with_no_treesitter(function()
     H.with_scratch_buf({
@@ -170,23 +159,21 @@ T["public resolution keeps root and context caches scoped to concrete buffers"] 
 
         local _, second_trace = plugin.resolve(0)
 
-        expect.equality(first_trace.root, first_root)
+        expect.equality(first_trace.module_dir, first_module)
+        expect.equality(first_trace.workspace_root, first_workspace)
         expect.equality(first_trace.kind, "resource")
         expect.equality(first_trace.type, "aws_instance")
-        expect.equality(second_trace.root, second_root)
+        expect.equality(second_trace.module_dir, second_module)
+        expect.equality(second_trace.workspace_root, second_workspace)
         expect.equality(second_trace.kind, "data")
         expect.equality(second_trace.type, "google_compute_image")
-        expect.equality(cache.get_root(first_buf), first_root)
-        expect.equality(cache.get_root(second_buf), second_root)
-        expect.equality(cache.get_root(0), nil)
       end)
     end)
   end)
 end
 
-T["buffer lifecycle autocmds invalidate only the event buffer"] = function()
+T["buffer lifecycle autocmds invalidate only the event buffer context"] = function()
   H.reset_state()
-  local cache = require("tf-docs.cache")
   local plugin = require("tf-docs")
   local ts = require("tf-docs.ts")
 
@@ -194,9 +181,6 @@ T["buffer lifecycle autocmds invalidate only the event buffer"] = function()
 
   H.with_scratch_buf({}, function(first_buf)
     H.with_scratch_buf({}, function(second_buf)
-      cache.set_root(first_buf, "/tmp/first")
-      cache.set_root(second_buf, "/tmp/second")
-
       local context_clears = {}
       H.with_patches({
         {
@@ -208,15 +192,7 @@ T["buffer lifecycle autocmds invalidate only the event buffer"] = function()
         },
       }, function()
         vim.api.nvim_exec_autocmds("BufFilePost", { buffer = first_buf })
-
-        expect.equality(cache.get_root(first_buf), nil)
-        expect.equality(cache.get_root(second_buf), "/tmp/second")
-
-        cache.set_root(first_buf, "/tmp/first")
         vim.api.nvim_exec_autocmds("BufWipeout", { buffer = second_buf })
-
-        expect.equality(cache.get_root(first_buf), "/tmp/first")
-        expect.equality(cache.get_root(second_buf), nil)
       end)
 
       expect.equality(context_clears, { first_buf, second_buf })
@@ -309,7 +285,8 @@ T["TfDocPeek passes trace to ui.peek"] = function()
         expect.equality(bufnr, expected_buf)
         return "https://example.com/peek",
           {
-            root = "/tmp/root",
+            module_dir = "/tmp/root/module",
+            workspace_root = "/tmp/root",
             kind = "resource",
             type = "aws_instance",
             provider_source = "hashicorp/aws",
@@ -352,7 +329,8 @@ T["TfDocDebug outputs trace fields"] = function()
         expect.equality(bufnr, expected_buf)
         return "https://example.com/debug",
           {
-            root = "/tmp/root",
+            module_dir = "/tmp/root/module",
+            workspace_root = "/tmp/root",
             kind = "data",
             type = "aws_ami",
             module_source = nil,
@@ -377,11 +355,55 @@ T["TfDocDebug outputs trace fields"] = function()
   end)
 
   expect.equality(captured_level, "info")
+  expect.equality(captured_msg:find("module directory: /tmp/root/module") ~= nil, true)
+  expect.equality(captured_msg:find("workspace root: /tmp/root") ~= nil, true)
   expect.equality(captured_msg:find("kind: data") ~= nil, true)
   expect.equality(captured_msg:find("url: https://example.com/debug") ~= nil, true)
 end
 
-T["TfDocList resolves selected item without moving cursor"] = function()
+T["TfDocDebug uses the configured scope resolver"] = function()
+  H.reset_state()
+  local plugin = require("tf-docs")
+  local log = require("tf-docs.log")
+  local ts = require("tf-docs.ts")
+
+  local callback_bufnr
+  plugin.setup({
+    scope_resolver = function(bufnr)
+      callback_bufnr = bufnr
+      return {
+        module_dir = "/tmp/debug-module",
+        workspace_root = "/tmp/debug-workspace",
+      }
+    end,
+  })
+
+  local captured_msg
+  H.with_patches({
+    {
+      target = ts,
+      key = "get_context",
+      value = function()
+        return nil
+      end,
+    },
+    {
+      target = log,
+      key = "log_force",
+      value = function(_, msg)
+        captured_msg = msg
+      end,
+    },
+  }, function()
+    vim.api.nvim_cmd({ cmd = "TfDocDebug" }, {})
+  end)
+
+  expect.equality(callback_bufnr, vim.api.nvim_get_current_buf())
+  expect.equality(captured_msg:find("module directory: /tmp/debug-module", 1, true) ~= nil, true)
+  expect.equality(captured_msg:find("workspace root: /tmp/debug-workspace", 1, true) ~= nil, true)
+end
+
+T["public API list() propagates scopes without moving the cursor"] = function()
   H.reset_state()
   local plugin = require("tf-docs")
   local resolver = require("tf-docs.resolver")
@@ -399,7 +421,7 @@ T["TfDocList resolves selected item without moving cursor"] = function()
       "}",
     },
     cursor = { 1, 0 },
-  }, function()
+  }, function(bufnr)
     local cursor_before = vim.api.nvim_win_get_cursor(0)
     local opened_url
     local resolve_calls = 0
@@ -428,6 +450,8 @@ T["TfDocList resolves selected item without moving cursor"] = function()
         key = "resolve",
         value = function(_, opts)
           resolve_calls = resolve_calls + 1
+          expect.equality(opts.module_dir, "/tmp/list-module")
+          expect.equality(opts.workspace_root, "/tmp/list-workspace")
           expect.equality(opts.context.kind, "resource")
           expect.equality(opts.context.type, "aws_ami")
           return "https://example.com/docs", { url = "https://example.com/docs" }
@@ -449,12 +473,124 @@ T["TfDocList resolves selected item without moving cursor"] = function()
         end,
       },
     }, function()
-      vim.api.nvim_cmd({ cmd = "TfDocList" }, {})
+      plugin.list(bufnr, { module_dir = "/tmp/list-module", workspace_root = "/tmp/list-workspace" })
     end)
 
     expect.equality(resolve_calls, 1)
     expect.equality(opened_url, "https://example.com/docs")
     expect.equality(vim.api.nvim_win_get_cursor(0), cursor_before)
+  end)
+end
+
+T["public API list() snapshots scopes across a delayed selection"] = function()
+  H.reset_state()
+  local plugin = require("tf-docs")
+  local registry = require("tf-docs.registry")
+  local resolver = require("tf-docs.resolver")
+  local ts = require("tf-docs.ts")
+  local ui = require("tf-docs.ui")
+
+  plugin.setup()
+
+  H.with_scratch_buf({ lines = { 'resource "aws_instance" "x" {}' } }, function(source_bufnr)
+    local caller_opts = {
+      module_dir = "/tmp/original-module",
+      workspace_root = "/tmp/original-workspace",
+    }
+    local delayed_choice
+    local selected_item
+    local switched_bufnr
+    local opened_url
+    local resolve_calls = 0
+    local registry_calls = 0
+
+    H.with_patches({
+      {
+        target = ts,
+        key = "list_resources",
+        value = function(bufnr)
+          expect.equality(bufnr, source_bufnr)
+          return { { kind = "resource", type = "aws_instance", name = "x", line = 1, col = 0 } }
+        end,
+      },
+      {
+        target = ts,
+        key = "get_context",
+        value = function(bufnr, cursor_pos)
+          expect.equality(bufnr, source_bufnr)
+          expect.equality(vim.api.nvim_get_current_buf(), switched_bufnr)
+          expect.equality(cursor_pos, { 1, 0 })
+          return { kind = "resource", type = "aws_instance" }
+        end,
+      },
+      {
+        target = resolver,
+        key = "resolve",
+        value = function(bufnr, opts)
+          resolve_calls = resolve_calls + 1
+          expect.equality(bufnr, source_bufnr)
+          expect.equality(opts == caller_opts, false)
+          expect.equality(opts.module_dir, "/tmp/original-module")
+          expect.equality(opts.workspace_root, "/tmp/original-workspace")
+          expect.equality(opts.context.type, "aws_instance")
+          local fallback_url = "https://registry.terraform.io/providers/hashicorp/aws/5.0.0/docs/resources/instance"
+          return fallback_url,
+            {
+              kind = "resource",
+              type = "aws_instance",
+              provider_source = "hashicorp/aws",
+              provider_version = "5.0.0",
+              url = fallback_url,
+            }
+        end,
+      },
+      {
+        target = registry,
+        key = "resolve_url",
+        value = function(trace, fallback_url, on_done)
+          registry_calls = registry_calls + 1
+          expect.equality(vim.api.nvim_get_current_buf(), switched_bufnr)
+          expect.equality(trace.provider_source, "hashicorp/aws")
+          expect.equality(
+            fallback_url,
+            "https://registry.terraform.io/providers/hashicorp/aws/5.0.0/docs/resources/instance"
+          )
+          on_done("https://registry.terraform.io/providers/hashicorp/aws/5.0.0/docs/resources/aws_instance")
+        end,
+      },
+      {
+        target = ui,
+        key = "select",
+        value = function(items, _, on_choice)
+          selected_item = items[1]
+          delayed_choice = on_choice
+        end,
+      },
+      {
+        target = ui,
+        key = "open",
+        value = function(url)
+          opened_url = url
+          return true
+        end,
+      },
+    }, function()
+      plugin.list(0, caller_opts)
+      caller_opts.module_dir = "/tmp/mutated-module"
+      caller_opts.workspace_root = "/tmp/mutated-workspace"
+
+      H.with_scratch_buf({ lines = { "switched" } }, function(bufnr)
+        switched_bufnr = bufnr
+        delayed_choice(selected_item)
+      end)
+    end)
+
+    expect.equality(resolve_calls, 1)
+    expect.equality(registry_calls, 1)
+    expect.equality(
+      opened_url,
+      "https://registry.terraform.io/providers/hashicorp/aws/5.0.0/docs/resources/aws_instance"
+    )
   end)
 end
 
@@ -491,7 +627,7 @@ T["TfDocList resolves its selection against the originating buffer"] = function(
           value = function(bufnr)
             observed.list = bufnr
             return {
-              { kind = "resource", type = "aws_instance", name = "source", line = 1 },
+              { kind = "resource", type = "aws_instance", name = "source", line = 1, col = 0 },
             }
           end,
         },
@@ -618,6 +754,65 @@ T["TfDocList does not resolve when selection is cancelled"] = function()
   end)
 end
 
+T["TfDocList uses the configured scope resolver"] = function()
+  H.reset_state()
+  local plugin = require("tf-docs")
+  local ts = require("tf-docs.ts")
+  local ui = require("tf-docs.ui")
+
+  local callback_count = 0
+  plugin.setup({
+    scope_resolver = function()
+      callback_count = callback_count + 1
+      return {
+        module_dir = "/tmp/list-module",
+        workspace_root = "/tmp/list-workspace",
+      }
+    end,
+  })
+
+  H.with_scratch_buf({ lines = { 'module "vpc" { source = "terraform-aws-modules/vpc/aws" }' } }, function()
+    local opened_url
+    H.with_patches({
+      {
+        target = ts,
+        key = "list_resources",
+        value = function()
+          return { { kind = "module", name = "vpc", line = 1 } }
+        end,
+      },
+      {
+        target = ts,
+        key = "get_context",
+        value = function()
+          return { kind = "module", module_source = "terraform-aws-modules/vpc/aws" }
+        end,
+      },
+      {
+        target = ui,
+        key = "select",
+        value = function(items, _, on_choice)
+          on_choice(items[1])
+        end,
+      },
+      {
+        target = ui,
+        key = "open",
+        value = function(url)
+          opened_url = url
+          return true
+        end,
+      },
+    }, function()
+      vim.api.nvim_cmd({ cmd = "TfDocList" }, {})
+    end)
+
+    expect.equality(opened_url, "https://registry.terraform.io/modules/terraform-aws-modules/vpc/aws")
+  end)
+
+  expect.equality(callback_count, 1)
+end
+
 T["TfDocClearCache clears cache and lockfile meta"] = function()
   H.reset_state()
   local plugin = require("tf-docs")
@@ -636,20 +831,17 @@ T["TfDocClearCache clears cache and lockfile meta"] = function()
   }, lockfile_path)
 
   lockfile.resolve(tmp_root)
-  cache.set_required(tmp_root, { aws = "hashicorp/aws" })
-  cache.set_lockfile(tmp_root, { ["hashicorp/aws"] = "1.0.0" })
-  cache.set_root(999, tmp_root)
+  cache.set_required(tmp_root, { aws = "hashicorp/aws" }, "required-signature")
+  cache.set_lockfile(tmp_root, { ["hashicorp/aws"] = "1.0.0" }, "lockfile-signature", {})
 
   expect.equality(lockfile.get_meta(tmp_root)["hashicorp/aws"].version_missing, true)
-  expect.equality(cache.get_required(tmp_root).aws, "hashicorp/aws")
-  expect.equality(cache.get_lockfile(tmp_root)["hashicorp/aws"], "1.0.0")
-  expect.equality(cache.get_root(999), tmp_root)
+  expect.equality(cache.get_required(tmp_root, "required-signature").aws, "hashicorp/aws")
+  expect.equality(cache.get_lockfile(tmp_root, "lockfile-signature")["hashicorp/aws"], "1.0.0")
 
   vim.api.nvim_cmd({ cmd = "TfDocClearCache" }, {})
 
-  expect.equality(cache.get_required(tmp_root), nil)
-  expect.equality(cache.get_lockfile(tmp_root), nil)
-  expect.equality(cache.get_root(999), nil)
+  expect.equality(cache.get_required(tmp_root, "required-signature"), nil)
+  expect.equality(cache.get_lockfile(tmp_root, "lockfile-signature"), nil)
   expect.equality(next(lockfile.get_meta(tmp_root)), nil)
 
   vim.fn.delete(tmp_root, "rf")
@@ -659,22 +851,18 @@ T["TfDocVersion passes resolved values to UI"] = function()
   H.reset_state()
   local plugin = require("tf-docs")
   local lockfile = require("tf-docs.lockfile")
-  local root = require("tf-docs.root")
   local ui = require("tf-docs.ui")
 
-  plugin.setup()
+  local callback_bufnr
+  plugin.setup({
+    scope_resolver = function(bufnr)
+      callback_bufnr = bufnr
+      return { workspace_root = "/tmp/project" }
+    end,
+  })
 
   local captured
-  local expected_buf = vim.api.nvim_get_current_buf()
   H.with_patches({
-    {
-      target = root,
-      key = "get_root",
-      value = function(bufnr)
-        expect.equality(bufnr, expected_buf)
-        return "/tmp/project"
-      end,
-    },
     {
       target = lockfile,
       key = "resolve",
@@ -705,7 +893,7 @@ T["TfDocVersion passes resolved values to UI"] = function()
       value = function(versions, resolved_root, meta, has_lockfile)
         captured = {
           versions = versions,
-          root = resolved_root,
+          workspace_root = resolved_root,
           meta = meta,
           has_lockfile = has_lockfile,
         }
@@ -715,26 +903,41 @@ T["TfDocVersion passes resolved values to UI"] = function()
     vim.api.nvim_cmd({ cmd = "TfDocVersion" }, {})
   end)
 
-  expect.equality(captured.root, "/tmp/project")
+  expect.equality(captured.workspace_root, "/tmp/project")
   expect.equality(captured.versions["hashicorp/aws"], "5.30.0")
   expect.equality(captured.has_lockfile, true)
+  expect.equality(callback_bufnr, vim.api.nvim_get_current_buf())
 end
 
-T["public API open() opens resolved URL"] = function()
+T["public API open() propagates scopes and opens the Registry-corrected URL"] = function()
   H.reset_state()
   local plugin = require("tf-docs")
+  local registry = require("tf-docs.registry")
   local resolver = require("tf-docs.resolver")
   local ui = require("tf-docs.ui")
 
   plugin.setup()
 
   local opened_url
+  local captured_bufnr
+  local captured_opts
   H.with_patches({
     {
       target = resolver,
       key = "resolve",
-      value = function()
-        return "https://example.com/api-open", { url = "https://example.com/api-open" }
+      value = function(bufnr, opts)
+        captured_bufnr = bufnr
+        captured_opts = opts
+        return "https://example.com/api-open", { url = "https://example.com/api-open", kind = "resource" }
+      end,
+    },
+    {
+      target = registry,
+      key = "resolve_url",
+      value = function(trace, fallback_url, on_done)
+        expect.equality(trace.kind, "resource")
+        expect.equality(fallback_url, "https://example.com/api-open")
+        on_done("https://example.com/registry-corrected")
       end,
     },
     {
@@ -746,13 +949,16 @@ T["public API open() opens resolved URL"] = function()
       end,
     },
   }, function()
-    plugin.open()
+    plugin.open(42, { module_dir = "/tmp/module", workspace_root = "/tmp/workspace" })
   end)
 
-  expect.equality(opened_url, "https://example.com/api-open")
+  expect.equality(captured_bufnr, 42)
+  expect.equality(captured_opts.module_dir, "/tmp/module")
+  expect.equality(captured_opts.workspace_root, "/tmp/workspace")
+  expect.equality(opened_url, "https://example.com/registry-corrected")
 end
 
-T["public API copy_url() copies resolved URL"] = function()
+T["public API copy_url() propagates explicit scopes"] = function()
   H.reset_state()
   local plugin = require("tf-docs")
   local resolver = require("tf-docs.resolver")
@@ -761,11 +967,13 @@ T["public API copy_url() copies resolved URL"] = function()
   plugin.setup()
 
   local copied_url
+  local captured_opts
   H.with_patches({
     {
       target = resolver,
       key = "resolve",
-      value = function()
+      value = function(_, opts)
+        captured_opts = opts
         return "https://example.com/api-copy", { url = "https://example.com/api-copy" }
       end,
     },
@@ -777,10 +985,47 @@ T["public API copy_url() copies resolved URL"] = function()
       end,
     },
   }, function()
-    plugin.copy_url()
+    plugin.copy_url(0, { module_dir = "/tmp/copy-module", workspace_root = "/tmp/copy-workspace" })
   end)
 
   expect.equality(copied_url, "https://example.com/api-copy")
+  expect.equality(captured_opts.module_dir, "/tmp/copy-module")
+  expect.equality(captured_opts.workspace_root, "/tmp/copy-workspace")
+end
+
+T["public API peek() propagates explicit scopes"] = function()
+  H.reset_state()
+  local plugin = require("tf-docs")
+  local resolver = require("tf-docs.resolver")
+  local ui = require("tf-docs.ui")
+
+  plugin.setup()
+
+  local captured_opts
+  local captured_trace
+  H.with_patches({
+    {
+      target = resolver,
+      key = "resolve",
+      value = function(_, opts)
+        captured_opts = opts
+        return "https://example.com/api-peek", { url = "https://example.com/api-peek" }
+      end,
+    },
+    {
+      target = ui,
+      key = "peek",
+      value = function(trace)
+        captured_trace = trace
+      end,
+    },
+  }, function()
+    plugin.peek(0, { module_dir = "/tmp/peek-module", workspace_root = "/tmp/peek-workspace" })
+  end)
+
+  expect.equality(captured_opts.module_dir, "/tmp/peek-module")
+  expect.equality(captured_opts.workspace_root, "/tmp/peek-workspace")
+  expect.equality(captured_trace.url, "https://example.com/api-peek")
 end
 
 T["public API resolve() returns url and trace without opening or notifying"] = function()
@@ -836,14 +1081,12 @@ T["public API clear_cache() clears cache and lockfile meta"] = function()
 
   plugin.setup()
 
-  cache.set_required("/tmp/api-root", { aws = "hashicorp/aws" })
-  cache.set_root(998, "/tmp/api-root")
-  expect.equality(cache.get_required("/tmp/api-root").aws, "hashicorp/aws")
+  cache.set_required("/tmp/api-root", { aws = "hashicorp/aws" }, "api-signature")
+  expect.equality(cache.get_required("/tmp/api-root", "api-signature").aws, "hashicorp/aws")
 
   plugin.clear_cache()
 
-  expect.equality(cache.get_required("/tmp/api-root"), nil)
-  expect.equality(cache.get_root(998), nil)
+  expect.equality(cache.get_required("/tmp/api-root", "api-signature"), nil)
   expect.equality(next(lockfile.get_meta("/tmp/api-root")), nil)
 end
 

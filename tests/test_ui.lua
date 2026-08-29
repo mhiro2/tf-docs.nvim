@@ -129,7 +129,7 @@ T["ui versions view shows missing lockfile and empty providers"] = function()
 
   local lines = ui._build_versions_lines({}, "/root", {}, false)
   expect.equality(lines[1], "tf-docs.nvim - Provider Versions")
-  expect.equality(lines[3], "Root: /root")
+  expect.equality(lines[3], "Workspace root: /root")
   expect.equality(lines[4], "Lockfile: .terraform.lock.hcl (missing)")
   expect.equality(lines[6], "(no providers found)")
 end

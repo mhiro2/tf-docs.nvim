@@ -2,13 +2,13 @@ local M = {}
 
 ---@class TfDocsCacheEntry
 ---@field value any
+---@field signature string
+---@field meta any|nil
 
 ---@type table<string, TfDocsCacheEntry>
 local required_cache = {}
 ---@type table<string, TfDocsCacheEntry>
 local lockfile_cache = {}
----@type table<number, string>
-local root_cache = {}
 -- Registry v2 lookups (session-lived, no TTL). Provider version metadata and
 -- resolved doc slugs are stable for a given provider version, so they are kept
 -- until an explicit clear (DirChanged / lockfile write / :TfDocClearCache).
@@ -17,42 +17,41 @@ local provider_versions_cache = {}
 ---@type table<string, string>
 local slug_cache = {}
 
----@param root string
+---@param module_dir string
+---@param signature string
 ---@return table|nil
-function M.get_required(root)
-  local entry = required_cache[root]
-  return entry and entry.value or nil
+function M.get_required(module_dir, signature)
+  local entry = required_cache[module_dir]
+  if entry and entry.signature == signature then
+    return entry.value
+  end
+  return nil
 end
 
----@param root string
+---@param module_dir string
 ---@param value table
-function M.set_required(root, value)
-  required_cache[root] = { value = value }
+---@param signature string
+function M.set_required(module_dir, value, signature)
+  required_cache[module_dir] = { value = value, signature = signature }
 end
 
----@param root string
----@return table|nil
-function M.get_lockfile(root)
-  local entry = lockfile_cache[root]
-  return entry and entry.value or nil
+---@param workspace_root string
+---@param signature string
+---@return table|nil, table|nil
+function M.get_lockfile(workspace_root, signature)
+  local entry = lockfile_cache[workspace_root]
+  if entry and entry.signature == signature then
+    return entry.value, entry.meta
+  end
+  return nil, nil
 end
 
----@param root string
+---@param workspace_root string
 ---@param value table
-function M.set_lockfile(root, value)
-  lockfile_cache[root] = { value = value }
-end
-
----@param bufnr number
----@return string|nil
-function M.get_root(bufnr)
-  return root_cache[bufnr]
-end
-
----@param bufnr number
----@param root string
-function M.set_root(bufnr, root)
-  root_cache[bufnr] = root
+---@param signature string
+---@param meta table
+function M.set_lockfile(workspace_root, value, signature, meta)
+  lockfile_cache[workspace_root] = { value = value, signature = signature, meta = meta }
 end
 
 ---Provider version metadata for a registry source ("namespace/name").
@@ -81,15 +80,9 @@ function M.set_slug(key, slug)
   slug_cache[key] = slug
 end
 
----@param bufnr number
-function M.clear_buf(bufnr)
-  root_cache[bufnr] = nil
-end
-
 function M.clear()
   required_cache = {}
   lockfile_cache = {}
-  root_cache = {}
   provider_versions_cache = {}
   slug_cache = {}
 end

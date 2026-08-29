@@ -9,7 +9,7 @@ local M = {}
 ---@field version_multiple boolean|nil
 
 ---@type table<string, table<string, TfDocsLockfileMeta>>
-local meta_by_root = {}
+local meta_by_workspace = {}
 
 local function normalize_source(source)
   return source:gsub("^registry%.terraform%.io/", "")
@@ -88,43 +88,46 @@ function M.parse_text(text)
   return versions, meta
 end
 
----@param root string|nil
+---@param workspace_root string|nil
 ---@return table<string, string>
-function M.resolve(root)
-  if not root then
+function M.resolve(workspace_root)
+  if not workspace_root then
     return {}
   end
 
-  local cached = cache.get_lockfile(root)
+  local path = vim.fs.joinpath(workspace_root, ".terraform.lock.hcl")
+  local signature = utils.file_signature(path)
+  local cached, cached_meta = cache.get_lockfile(workspace_root, signature)
   if cached then
+    meta_by_workspace[workspace_root] = cached_meta or {}
     return cached
   end
 
-  local path = vim.fs.joinpath(root, ".terraform.lock.hcl")
-  local content = utils.read_file(path)
+  local content, final_signature = utils.read_source(path)
   if not content then
-    cache.set_lockfile(root, {})
-    meta_by_root[root] = {}
+    cache.set_lockfile(workspace_root, {}, final_signature, {})
+    meta_by_workspace[workspace_root] = {}
     return {}
   end
 
   local parsed, meta = M.parse_text(content)
-  cache.set_lockfile(root, parsed)
-  meta_by_root[root] = meta or {}
+  meta = meta or {}
+  cache.set_lockfile(workspace_root, parsed, final_signature, meta)
+  meta_by_workspace[workspace_root] = meta
   return parsed
 end
 
----@param root string|nil
+---@param workspace_root string|nil
 ---@return table<string, TfDocsLockfileMeta>
-function M.get_meta(root)
-  if not root then
+function M.get_meta(workspace_root)
+  if not workspace_root then
     return {}
   end
-  return meta_by_root[root] or {}
+  return meta_by_workspace[workspace_root] or {}
 end
 
 function M.clear_meta()
-  meta_by_root = {}
+  meta_by_workspace = {}
 end
 
 ---@param versions table<string, string>
