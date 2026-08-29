@@ -5,9 +5,9 @@
 
 Open the *correct* Terraform documentation for the symbol under your cursor, with workspace-aware resolution:
 
-- Resolves provider **namespace/name** from `required_providers`
-- Resolves provider **version** from `.terraform.lock.hcl`
-- Opens Terraform Registry docs for **resource / data source / module**
+- Resolves provider **namespace/name** from the current module's `required_providers`
+- Resolves provider **version** from the workspace's `.terraform.lock.hcl`
+- Opens Registry, Developer, or source docs for **resource / data source / module**
 - Optional best-effort deep-link to an **attribute / nested block anchor**
 
 This is designed to eliminate repeated Google searches and reduce context switching while authoring Terraform.
@@ -35,8 +35,8 @@ This is designed to eliminate repeated Google searches and reduce context switch
   - `resource "<TYPE>" "<NAME>" { ... }`
   - `data "<TYPE>" "<NAME>" { ... }`
   - `module "<NAME>" { source = "..." }` *(best-effort)*
-- 🧭 Resolve provider source (`namespace/name`) from `required_providers`
-- 🔒 Resolve provider version from `.terraform.lock.hcl`
+- 🧭 Resolve provider source (`namespace/name`) from the buffer's module directory
+- 🔒 Resolve provider version from the detected workspace root
 - 🔗 Best-effort deep linking to the argument/block under cursor (`#anchor`, allowlist-based)
 - 🌐 Open URLs via `vim.ui.open()` (cross-platform)
 - 📋 Copy resolved URL to clipboard
@@ -115,11 +115,12 @@ Now place the cursor inside a Terraform block and press `gK` (or `K` if you opte
 ## 🧰 Commands
 
 * `:TfDocOpen`
-  Resolve context (resource/data/module) and open the Terraform Registry URL.
+  Resolve context (resource/data/module) and open its documentation URL.
 * `:TfDocCopyUrl`
   Resolve and copy the URL to your clipboard.
 * `:TfDocDebug`
-  Print a resolution trace (root, provider source/version, kind/type, URL). The
+  Print a resolution trace (module directory, workspace root, provider
+  source/version, kind/type, URL). The
   URL is resolved synchronously, so it reflects the registry-corrected slug only
   when it is already cached (see [How the docs slug is resolved](#how-the-docs-slug-is-resolved));
   otherwise it shows the heuristic URL.
@@ -129,17 +130,19 @@ Now place the cursor inside a Terraform block and press `gK` (or `K` if you opte
 * `:TfDocList`
   List all resources/data sources/modules in the current buffer. Select one to open its documentation.
 * `:TfDocVersion`
-  Display resolved provider versions from `.terraform.lock.hcl` in a floating window.
+  Display provider versions from the workspace root's `.terraform.lock.hcl` in a floating window.
 * `:TfDocClearCache`
-  Clear internal caches (root/provider/lockfile resolution). Use this after changing `required_providers` or `.terraform.lock.hcl`.
+  Clear all internal resolution caches. Provider and lockfile caches normally
+  refresh themselves when files change, including changes made outside Neovim.
 
 ## 🧩 Lua API
 
 For keymaps and integrations, prefer the public functions on the `tf-docs`
 module over requiring internal modules (`tf-docs.resolver`, `tf-docs.ui`, …),
 whose layout may change without notice. `open`/`copy_url`/`peek`/`list`/`resolve`
-take an optional `bufnr` (defaults to the current buffer); `resolve` also
-accepts an `opts` table, and `clear_cache` takes no arguments.
+take an optional `bufnr` (defaults to the current buffer) followed by an
+optional scope `opts` table. `resolve` additionally accepts a precomputed
+cursor `context`; `clear_cache` takes no arguments.
 
 ```lua
 local tf = require("tf-docs")
@@ -148,7 +151,7 @@ tf.open()        -- resolve the symbol under the cursor and open its docs
 tf.copy_url()    -- resolve and copy the docs URL to the clipboard
 tf.peek()        -- show the resolved URL + trace in a floating window
 tf.list()        -- pick a resource/data/module in the buffer and open its docs
-tf.clear_cache() -- clear internal caches (root/provider/lockfile resolution)
+tf.clear_cache() -- clear all internal resolution caches
 
 -- resolve() returns the URL (or nil) and a trace without opening a browser
 -- or showing the "unresolved" notification, so callers can route the result
@@ -157,7 +160,22 @@ tf.clear_cache() -- clear internal caches (root/provider/lockfile resolution)
 -- that slug is already cached, otherwise the heuristic URL. open/copy_url/list
 -- additionally perform the (async) registry lookup before acting.
 local url, trace = tf.resolve()
+
+-- Every action accepts explicit scopes for monorepo integrations. Normally
+-- these are inferred from the buffer path and root_markers.
+local scopes = {
+  module_dir = "/repo/modules/network",
+  workspace_root = "/repo/environments/production",
+}
+tf.open(0, scopes)
+tf.copy_url(0, scopes)
+tf.peek(0, scopes)
+tf.list(0, scopes)
+url, trace = tf.resolve(0, scopes)
 ```
+
+The trace distinguishes `module_dir` (where `required_providers` is read) from
+`workspace_root` (where `.terraform.lock.hcl` is read).
 
 ## ⚙️ Configuration
 
@@ -165,14 +183,15 @@ Default configuration is intentionally conservative. You can override via:
 
 ```lua
 require("tf-docs").setup({
-  -- Root detection markers (priority order; first match wins).
+  -- Workspace-root markers. The nearest marker directory wins; this order only
+  -- breaks ties between markers in the same directory.
   root_markers = { ".terraform.lock.hcl", "terraform.tf", "main.tf", ".git" },
+
+  -- Optional monorepo scope hook used by commands and Lua actions.
+  scope_resolver = nil,
 
   default_namespace = "hashicorp",
   default_version = "latest",
-
-  -- Files to scan for required_providers (best-effort, per root)
-  required_providers_files = { "versions.tf", "providers.tf", "main.tf", "terraform.tf" },
 
   -- Best-effort attribute/block anchor links
   enable_anchor = true,
@@ -228,13 +247,59 @@ require("tf-docs").setup({
 
 ### How provider resolution works
 
+tf-docs treats Terraform's two filesystem scopes separately:
+
+* The **module directory** is the directory containing the current buffer.
+  All Terraform configuration files directly in that directory (`*.tf` and
+  `*.tf.json`) are scanned for `required_providers`. Modified in-memory files,
+  including new buffers that do not exist on disk yet, take precedence over
+  disk.
+* The **workspace root** is found by walking upward from the module directory.
+  The nearest directory containing any `root_markers` entry wins; marker order
+  only breaks ties in the same directory. Its `.terraform.lock.hcl` supplies
+  provider versions.
+
+For file discovery and ordering, tf-docs follows Terraform's loading rules:
+basenames starting with `.`, ending with `~`, or wrapped in `#` are ignored;
+normal files are processed first; and `override.tf`, `override.tf.json`,
+`*_override.tf`, and `*_override.tf.json` are applied
+afterward in filename order. A provider declaration without an explicit
+`source` clears an earlier source and uses the implied `hashicorp/<local-name>`
+address.
+
+For monorepos where path-based discovery is insufficient, `scope_resolver`
+can return `module_dir`, `workspace_root`, or both for each buffer. It applies
+to `:TfDocOpen`, `:TfDocCopyUrl`, `:TfDocDebug`, `:TfDocPeek`, `:TfDocList`, and
+`:TfDocVersion`, as well as the Lua actions. Explicit Lua action options take
+precedence over the callback, and any still-missing field is discovered
+automatically.
+
+For example, a callback can read a buffer-local scope set by another plugin:
+
+```lua
+require("tf-docs").setup({
+  scope_resolver = function(bufnr)
+    -- { module_dir = "/repo/module", workspace_root = "/repo/env" }
+    return vim.b[bufnr].tf_docs_scope
+  end,
+})
+```
+
 For a type like `google_compute_instance`:
 
 1. Provider name is inferred from the prefix: `google`
    - If `provider = <alias>` is set in the block, that alias is preferred
-2. `required_providers` is consulted to resolve `source = "namespace/name"`
-3. `.terraform.lock.hcl` is consulted to resolve the version
+2. The module directory's `required_providers` is consulted to resolve
+   `source = "namespace/name"`
+3. The workspace root's `.terraform.lock.hcl` is consulted to resolve the version
 4. URL is generated for that `(namespace, name, version)` and opened
+
+Terraform's exact built-in types bypass this provider flow and Registry lookup:
+
+* `terraform_data` opens the official Terraform Developer resource page
+* `terraform_remote_state` opens the official Terraform Developer data-source page
+
+Their trace reports `terraform.io/builtin/terraform` as the provider source.
 
 Fallbacks:
 
@@ -319,6 +384,24 @@ Opens:
 
 * `https://registry.terraform.io/providers/hashicorp/aws/<version>/docs/data-sources/ami`
 
+### Terraform built-ins
+
+```hcl
+resource "terraform_data" "bootstrap" {
+  input = "ready"
+}
+
+data "terraform_remote_state" "network" {
+  backend = "local"
+}
+```
+
+These exact built-in types open their official Terraform Developer pages rather
+than the discontinued `hashicorp/terraform` provider pages:
+
+* `https://developer.hashicorp.com/terraform/language/resources/terraform-data`
+* `https://developer.hashicorp.com/terraform/language/state/remote-state-data`
+
 ### Custom provider source
 
 ```hcl
@@ -359,19 +442,30 @@ Anchor behavior is not guaranteed across all providers and is intentionally limi
 * Check `:TfDocDebug` output
 * Ensure:
 
-  * `terraform { required_providers { ... } }` exists in files listed in `required_providers_files`
-  * `.terraform.lock.hcl` exists in the detected root
-* Monorepo: confirm root detection matches your intended module (marker order wins)
+  * `terraform { required_providers { ... } }` exists in a `.tf` or `.tf.json`
+    file directly in the module directory
+  * `.terraform.lock.hcl` exists in the detected workspace root
+* For monorepos, inspect both `module directory` and `workspace root` in
+  `:TfDocDebug`. The nearest marker directory wins; use `scope_resolver` for
+  commands or explicit scope options on any Lua action when an integration
+  needs different scopes.
 
 ### Cache invalidation
 
-tf-docs caches root/provider/lockfile resolution. The cache is automatically
-cleared when you write:
+tf-docs caches parsed `required_providers`, lockfile data, Registry responses,
+and Treesitter context. Required-provider and lockfile entries carry filesystem
+signatures, so creation, replacement, and updates made by `terraform init`, Git,
+another editor, or a terminal are detected on the next resolution. Negative
+entries for missing files refresh when those files appear. Modified in-memory
+`.tf` and `.tf.json` module files take precedence over disk, including new
+buffers that have not been saved yet.
+
+The cache is also proactively cleared when you write:
 
 * `.terraform.lock.hcl`
-* any file listed in `required_providers_files`
+* any `.tf` or `.tf.json` file
 
-You can also clear caches manually with `:TfDocClearCache`.
+You can clear every cache manually with `:TfDocClearCache` when troubleshooting.
 
 ### Health check
 
@@ -387,7 +481,7 @@ Use `:checkhealth tf-docs` to verify your environment (Neovim version, `vim.ui.o
 
 ### Why not just use Terraform CLI for schema?
 
-This plugin focuses on opening the right Terraform Registry docs quickly and avoids external dependencies by default.
+This plugin focuses on opening the right Terraform documentation quickly and avoids external dependencies by default.
 
 ### Isn’t there already a plugin for this?
 

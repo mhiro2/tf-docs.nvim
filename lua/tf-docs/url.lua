@@ -1,5 +1,22 @@
 local M = {}
 
+local BUILTIN_DOCS = {
+  resource = {
+    terraform_data = "https://developer.hashicorp.com/terraform/language/resources/terraform-data",
+  },
+  data = {
+    terraform_remote_state = "https://developer.hashicorp.com/terraform/language/state/remote-state-data",
+  },
+}
+
+---@param kind string|nil
+---@param type_name string|nil
+---@return string|nil
+function M.builtin_url(kind, type_name)
+  local by_type = kind and BUILTIN_DOCS[kind] or nil
+  return by_type and type_name and by_type[type_name] or nil
+end
+
 local function escape_lua_pattern(str)
   return str:gsub("([^%w])", "%%%1")
 end

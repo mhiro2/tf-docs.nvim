@@ -7,8 +7,12 @@ local url = require("tf-docs.url")
 
 local M = {}
 
+---@class TfDocsResolveOpts: TfDocsScopeOpts
+---@field context? TfDocsContext
+
 ---@class TfDocsTrace
----@field root string|nil
+---@field module_dir string|nil
+---@field workspace_root string|nil
 ---@field kind string|nil
 ---@field type string|nil
 ---@field module_source string|nil Normalized module source without credentials or query parameters.
@@ -52,15 +56,18 @@ local function allow_anchor(source, allowlist)
 end
 
 ---@param bufnr number
----@param opts {context?: TfDocsContext, root?: string}|nil
+---@param opts TfDocsResolveOpts|nil
 ---@return string|nil, TfDocsTrace
 function M.resolve(bufnr, opts)
   local cfg = config.get()
   local trace = {}
   opts = opts or {}
 
-  local root_dir = opts.root or root.get_root(bufnr, cfg)
-  trace.root = root_dir
+  local scopes = root.resolve_scopes(bufnr, cfg, opts)
+  local module_dir = scopes.module_dir
+  local workspace_root = scopes.workspace_root
+  trace.module_dir = module_dir
+  trace.workspace_root = workspace_root
 
   local context = opts.context or ts.get_context(bufnr)
   if not context then
@@ -90,6 +97,14 @@ function M.resolve(bufnr, opts)
     return module_url, trace
   end
 
+  local builtin_url = url.builtin_url(context.kind, context.type)
+  if builtin_url then
+    trace.provider = "terraform"
+    trace.provider_source = "terraform.io/builtin/terraform"
+    trace.url = builtin_url
+    return builtin_url, trace
+  end
+
   local provider = infer_provider(context.type, context.provider_hint, cfg.provider_overrides)
   if not provider then
     trace.reason = "provider-unresolved"
@@ -97,9 +112,9 @@ function M.resolve(bufnr, opts)
   end
   trace.provider = provider
 
-  local required = required_providers.resolve(root_dir, cfg)
-  local versions = lockfile.resolve(root_dir)
-  local lock_meta = lockfile.get_meta(root_dir)
+  local required = required_providers.resolve(module_dir)
+  local versions = lockfile.resolve(workspace_root)
+  local lock_meta = lockfile.get_meta(workspace_root)
 
   local source = required[provider]
   if not source then

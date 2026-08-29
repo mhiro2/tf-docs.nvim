@@ -4,6 +4,7 @@ local lockfile = require("tf-docs.lockfile")
 local log = require("tf-docs.log")
 local registry = require("tf-docs.registry")
 local resolver = require("tf-docs.resolver")
+local root = require("tf-docs.root")
 local ui = require("tf-docs.ui")
 local ts = require("tf-docs.ts")
 
@@ -76,7 +77,7 @@ end
 
 ---Resolve the Terraform docs URL for a buffer without letting the resolver throw.
 ---@param bufnr number|nil
----@param opts { context?: TfDocsContext, root?: string }|nil
+---@param opts TfDocsResolveOpts|nil
 ---@return string|nil, TfDocsTrace
 local function resolve_safe(bufnr, opts)
   bufnr = normalize_bufnr(bufnr)
@@ -120,9 +121,10 @@ end
 ---Resolve the symbol under the cursor, refine its slug via the Registry (with a
 ---heuristic fallback on timeout/failure), then hand the final URL to `sink`.
 ---@param bufnr number|nil
+---@param opts TfDocsScopeOpts|nil
 ---@param sink fun(url: string)
-local function with_resolved_url(bufnr, sink)
-  local url, trace = resolve_safe(bufnr)
+local function with_resolved_url(bufnr, opts, sink)
+  local url, trace = resolve_safe(bufnr, opts)
   if not url then
     notify_unresolved(trace)
     return
@@ -139,33 +141,38 @@ end
 -- tf-docs.ui, ...), whose layout may change without notice.
 -- ============================================================================
 
----Resolve the symbol under the cursor and open its Terraform Registry docs.
+---Resolve the symbol under the cursor and open its documentation.
 ---@param bufnr? number Buffer to resolve (defaults to the current buffer).
-function M.open(bufnr)
-  with_resolved_url(bufnr, function(url)
+---@param opts? TfDocsScopeOpts Explicit scope overrides.
+function M.open(bufnr, opts)
+  with_resolved_url(bufnr, opts, function(url)
     ui.open(url)
   end)
 end
 
 ---Resolve the symbol under the cursor and copy its docs URL to the clipboard.
 ---@param bufnr? number Buffer to resolve (defaults to the current buffer).
-function M.copy_url(bufnr)
-  with_resolved_url(bufnr, function(url)
+---@param opts? TfDocsScopeOpts Explicit scope overrides.
+function M.copy_url(bufnr, opts)
+  with_resolved_url(bufnr, opts, function(url)
     ui.copy(url)
   end)
 end
 
 ---Show the resolved URL and trace for the symbol under the cursor in a float.
 ---@param bufnr? number Buffer to resolve (defaults to the current buffer).
-function M.peek(bufnr)
-  local _, trace = resolve_safe(bufnr)
+---@param opts? TfDocsScopeOpts Explicit scope overrides.
+function M.peek(bufnr, opts)
+  local _, trace = resolve_safe(bufnr, opts)
   ui.peek(trace)
 end
 
 ---List resource/data/module blocks in the buffer and open docs for the choice.
 ---@param bufnr? number Buffer to list (defaults to the current buffer).
-function M.list(bufnr)
+---@param opts? TfDocsScopeOpts Explicit scope overrides.
+function M.list(bufnr, opts)
   bufnr = normalize_bufnr(bufnr)
+  local scope_opts = vim.deepcopy(opts or {})
   if not vim.api.nvim_buf_is_valid(bufnr) or not vim.api.nvim_buf_is_loaded(bufnr) then
     notify_unresolved({ reason = "list-buffer-unavailable" })
     return
@@ -214,7 +221,8 @@ function M.list(bufnr)
       notify_unresolved({ reason = "list-context-unresolved" })
       return
     end
-    local url, trace = resolve_safe(bufnr, { context = context })
+    local resolve_opts = vim.tbl_extend("force", {}, scope_opts, { context = context })
+    local url, trace = resolve_safe(bufnr, resolve_opts)
 
     if not url then
       notify_unresolved(trace)
@@ -230,13 +238,13 @@ end
 
 ---Resolve the Terraform docs URL for a buffer.
 ---@param bufnr? number Buffer to resolve (defaults to the current buffer).
----@param opts? { context?: TfDocsContext, root?: string }
+---@param opts? TfDocsResolveOpts
 ---@return string|nil url, TfDocsTrace trace
 function M.resolve(bufnr, opts)
   return resolve_safe(bufnr, opts)
 end
 
----Clear tf-docs internal caches (root/provider/lockfile resolution).
+---Clear tf-docs internal caches.
 function M.clear_cache()
   clear_runtime_cache()
   log.log(config.get(), "info", "tf-docs.nvim cache cleared")
@@ -249,7 +257,7 @@ local function create_commands()
 
   vim.api.nvim_create_user_command("TfDocOpen", function()
     M.open(0)
-  end, { desc = "tf-docs: open Terraform Registry docs for the symbol under the cursor" })
+  end, { desc = "tf-docs: open documentation for the symbol under the cursor" })
 
   vim.api.nvim_create_user_command("TfDocCopyUrl", function()
     M.copy_url(0)
@@ -259,7 +267,8 @@ local function create_commands()
     local _, trace = resolve_safe(0)
     local info = {
       "tf-docs.nvim trace:",
-      string.format("  root: %s", trace.root or "(none)"),
+      string.format("  module directory: %s", trace.module_dir or "(none)"),
+      string.format("  workspace root: %s", trace.workspace_root or "(none)"),
       string.format("  kind: %s", trace.kind or "(none)"),
       string.format("  type: %s", trace.type or "(none)"),
       string.format("  module: %s", trace.module_source or "(none)"),
@@ -278,20 +287,25 @@ local function create_commands()
 
   vim.api.nvim_create_user_command("TfDocVersion", function()
     local cfg = config.get()
-    local root = require("tf-docs.root").get_root(normalize_bufnr(0), cfg)
+    local ok, scopes_or_err = pcall(root.resolve_scopes, normalize_bufnr(0), cfg)
+    if not ok then
+      log.log(cfg, "error", string.format("Unable to resolve Terraform scopes: %s", tostring(scopes_or_err)))
+      return
+    end
+    local workspace_root = scopes_or_err.workspace_root
 
-    if not root then
-      log.log(cfg, "warn", "Unable to find Terraform root directory")
+    if not workspace_root then
+      log.log(cfg, "warn", "Unable to find Terraform workspace root")
       return
     end
 
-    local versions = lockfile.resolve(root)
-    local meta = lockfile.get_meta(root)
-    local lockfile_path = vim.fs.joinpath(root, ".terraform.lock.hcl")
+    local versions = lockfile.resolve(workspace_root)
+    local meta = lockfile.get_meta(workspace_root)
+    local lockfile_path = vim.fs.joinpath(workspace_root, ".terraform.lock.hcl")
     local stat = vim.uv.fs_stat(lockfile_path)
     local has_lockfile = stat ~= nil and stat.type == "file"
 
-    ui.show_versions(versions, root, meta, has_lockfile)
+    ui.show_versions(versions, workspace_root, meta, has_lockfile)
   end, { desc = "tf-docs: show provider versions resolved from .terraform.lock.hcl" })
 
   vim.api.nvim_create_user_command("TfDocClearCache", function()
@@ -306,13 +320,11 @@ local function create_commands()
 end
 
 local function create_autocmds()
-  local cfg = config.get()
   local group = vim.api.nvim_create_augroup(autocmd_group, { clear = true })
   vim.api.nvim_create_autocmd({ "BufWipeout", "BufFilePost" }, {
     group = group,
     callback = function(args)
       if args and type(args.buf) == "number" and args.buf > 0 then
-        cache.clear_buf(args.buf)
         ts.clear_buf_context(args.buf)
       end
     end,
@@ -323,11 +335,9 @@ local function create_autocmds()
     callback = clear_runtime_cache,
   })
 
-  local invalidate_patterns = vim.deepcopy(cfg.required_providers_files)
-  table.insert(invalidate_patterns, ".terraform.lock.hcl")
   vim.api.nvim_create_autocmd("BufWritePost", {
     group = group,
-    pattern = invalidate_patterns,
+    pattern = { "*.tf", "*.tf.json", ".terraform.lock.hcl" },
     callback = clear_runtime_cache,
   })
 end
