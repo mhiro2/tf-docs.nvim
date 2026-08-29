@@ -33,13 +33,29 @@ function M.with_scratch_buf(opts, fn)
   return a, b, c, d
 end
 
----@param fn fun(): any
+---@class TfDocsNoTreesitterState
+---@field get_parser_calls number
+
+---@param fn fun(state: TfDocsNoTreesitterState): any
 ---@return any, any, any, any
 function M.with_no_treesitter(fn)
-  local saved = vim.treesitter
-  vim.treesitter = nil
-  local ok, a, b, c, d = pcall(fn)
-  vim.treesitter = saved
+  -- Resolve Neovim's lazy-loaded module before patching it. Assigning nil to
+  -- vim.treesitter lets the loader recreate the module on the next access.
+  local treesitter = vim.treesitter
+  local saved_get_parser = treesitter and treesitter.get_parser or nil
+  local state = { get_parser_calls = 0 }
+  if treesitter then
+    treesitter.get_parser = function()
+      state.get_parser_calls = state.get_parser_calls + 1
+      error("forced Tree-sitter unavailability")
+    end
+  end
+
+  local ok, a, b, c, d = pcall(fn, state)
+
+  if treesitter then
+    treesitter.get_parser = saved_get_parser
+  end
   if not ok then
     error(a)
   end

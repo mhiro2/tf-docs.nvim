@@ -22,6 +22,8 @@ end
 local unresolved_reason_messages = {
   ["no-context"] = "No terraform resource/data/module under cursor",
   ["module-disabled"] = "Module docs are disabled by configuration (enable_module_docs=false)",
+  ["module-source-expression"] = "Module source is not a static quoted literal",
+  ["module-source-missing"] = "Module block has no source attribute",
   ["module-source-unresolved"] = "Unable to resolve module source URL under cursor",
   ["provider-unresolved"] = "Unable to infer provider from resource/data type under cursor",
   ["url-unresolved"] = "Unable to build Terraform docs URL from current context",
@@ -180,7 +182,7 @@ function M.list(bufnr)
     end
 
     local r = selected.resource
-    local context = ts.get_context(bufnr, { r.line, 0 })
+    local context = ts.get_context(bufnr, { r.line, r.col })
     if not context then
       notify_unresolved({ reason = "list-context-unresolved" })
       return

@@ -40,7 +40,7 @@ function M.check()
   if has_treesitter_parser() then
     health.ok("treesitter parser available (terraform/hcl, optional)")
   else
-    health.warn("treesitter parser not detected; tf-docs will use line-based fallback parsing")
+    health.warn("treesitter parser not detected; tf-docs will use the built-in HCL structure scanner")
   end
 end
 

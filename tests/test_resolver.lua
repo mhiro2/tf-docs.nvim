@@ -136,4 +136,21 @@ T["integration: resolver.resolve() works end-to-end with root + ts.get_context"]
   expect.equality(trace.provider_version, "4.80.0")
 end
 
+T["resolver preserves the explicit reason for a module source expression"] = function()
+  H.reset_state()
+  local resolver = require("tf-docs.resolver")
+  local resolved_url, trace = resolver.resolve(0, {
+    context = {
+      kind = "module",
+      module_source = nil,
+      module_source_reason = "module-source-expression",
+    },
+    root = nil,
+  })
+
+  expect.equality(resolved_url, nil)
+  expect.equality(trace.module_source_reason, "module-source-expression")
+  expect.equality(trace.reason, "module-source-expression")
+end
+
 return T
