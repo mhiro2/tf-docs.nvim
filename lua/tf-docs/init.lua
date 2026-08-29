@@ -18,6 +18,15 @@ local function clear_runtime_cache()
   ts.clear_context_cache()
 end
 
+---@param bufnr number|nil
+---@return number
+local function normalize_bufnr(bufnr)
+  if bufnr == nil or bufnr == 0 then
+    return vim.api.nvim_get_current_buf()
+  end
+  return bufnr
+end
+
 ---@type table<string, string>
 local unresolved_reason_messages = {
   ["no-context"] = "No terraform resource/data/module under cursor",
@@ -28,6 +37,8 @@ local unresolved_reason_messages = {
   ["provider-unresolved"] = "Unable to infer provider from resource/data type under cursor",
   ["url-unresolved"] = "Unable to build Terraform docs URL from current context",
   ["list-context-unresolved"] = "Unable to resolve context for the selected terraform block",
+  ["list-buffer-unavailable"] = "The Terraform buffer was closed while selecting; run :TfDocList again",
+  ["list-buffer-changed"] = "The Terraform buffer changed while selecting; run :TfDocList again",
 }
 
 -- Reasons for which the resolver still returns a usable (fallback) URL. These
@@ -64,10 +75,11 @@ local function format_unresolved_message(trace)
 end
 
 ---Resolve the Terraform docs URL for a buffer without letting the resolver throw.
----@param bufnr number
+---@param bufnr number|nil
 ---@param opts { context?: TfDocsContext, root?: string }|nil
 ---@return string|nil, TfDocsTrace
 local function resolve_safe(bufnr, opts)
+  bufnr = normalize_bufnr(bufnr)
   local cfg = config.get()
   local ok, url_or_err, trace = pcall(resolver.resolve, bufnr, opts)
   if not ok then
@@ -110,7 +122,7 @@ end
 ---@param bufnr number|nil
 ---@param sink fun(url: string)
 local function with_resolved_url(bufnr, sink)
-  local url, trace = resolve_safe(bufnr or 0)
+  local url, trace = resolve_safe(bufnr)
   if not url then
     notify_unresolved(trace)
     return
@@ -146,14 +158,20 @@ end
 ---Show the resolved URL and trace for the symbol under the cursor in a float.
 ---@param bufnr? number Buffer to resolve (defaults to the current buffer).
 function M.peek(bufnr)
-  local _, trace = resolve_safe(bufnr or 0)
+  local _, trace = resolve_safe(bufnr)
   ui.peek(trace)
 end
 
 ---List resource/data/module blocks in the buffer and open docs for the choice.
 ---@param bufnr? number Buffer to list (defaults to the current buffer).
 function M.list(bufnr)
-  bufnr = bufnr or 0
+  bufnr = normalize_bufnr(bufnr)
+  if not vim.api.nvim_buf_is_valid(bufnr) or not vim.api.nvim_buf_is_loaded(bufnr) then
+    notify_unresolved({ reason = "list-buffer-unavailable" })
+    return
+  end
+
+  local changedtick = vim.api.nvim_buf_get_changedtick(bufnr)
   local resources = ts.list_resources(bufnr)
   if #resources == 0 then
     log.log(config.get(), "warn", "No terraform resources/data/modules found in current buffer")
@@ -178,6 +196,15 @@ function M.list(bufnr)
     end,
   }, function(selected)
     if not selected then
+      return
+    end
+
+    if not vim.api.nvim_buf_is_valid(bufnr) or not vim.api.nvim_buf_is_loaded(bufnr) then
+      notify_unresolved({ reason = "list-buffer-unavailable" })
+      return
+    end
+    if vim.api.nvim_buf_get_changedtick(bufnr) ~= changedtick then
+      notify_unresolved({ reason = "list-buffer-changed" })
       return
     end
 
@@ -206,7 +233,7 @@ end
 ---@param opts? { context?: TfDocsContext, root?: string }
 ---@return string|nil url, TfDocsTrace trace
 function M.resolve(bufnr, opts)
-  return resolve_safe(bufnr or 0, opts)
+  return resolve_safe(bufnr, opts)
 end
 
 ---Clear tf-docs internal caches (root/provider/lockfile resolution).
@@ -251,7 +278,7 @@ local function create_commands()
 
   vim.api.nvim_create_user_command("TfDocVersion", function()
     local cfg = config.get()
-    local root = require("tf-docs.root").get_root(0, cfg)
+    local root = require("tf-docs.root").get_root(normalize_bufnr(0), cfg)
 
     if not root then
       log.log(cfg, "warn", "Unable to find Terraform root directory")
