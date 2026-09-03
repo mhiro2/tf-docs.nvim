@@ -1131,7 +1131,7 @@ T["TfDocOpen maps unresolved reason to user-facing message"] = function()
   expect.equality(open_calls, 0)
   expect.equality(#logs, 1)
   expect.equality(logs[1].level, "warn")
-  expect.equality(logs[1].msg, "Unable to infer provider from resource/data type under cursor")
+  expect.equality(logs[1].msg, "Unable to infer provider from block type under cursor")
 end
 
 T["TfDocOpen still opens but notifies (info) when a version fallback is used"] = function()

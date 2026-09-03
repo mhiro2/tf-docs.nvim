@@ -1,4 +1,5 @@
 local M = {}
+local kinds = require("tf-docs.kinds")
 
 ---@class TfDocsHclToken
 ---@field kind "ident"|"string"|"symbol"
@@ -89,7 +90,7 @@ end
 ---@field static boolean|nil
 
 ---@class TfDocsHclStructuralBlock
----@field kind "resource"|"data"|"module"
+---@field kind TfDocsBlockKind
 ---@field type string|nil
 ---@field name string
 ---@field line number
@@ -121,7 +122,7 @@ end
 
 ---@param tokens TfDocsHclStructuralToken[]
 ---@param index number
----@return { kind: "resource"|"data"|"module", type: string|nil, name: string, open_token: number }|nil
+---@return { kind: TfDocsBlockKind, type: string|nil, name: string, open_token: number }|nil
 local function structural_header_at(tokens, index)
   local keyword = tokens[index]
   if not keyword or keyword.kind ~= "ident" then
@@ -147,7 +148,7 @@ local function structural_header_at(tokens, index)
     return nil
   end
 
-  if keyword.value ~= "resource" and keyword.value ~= "data" then
+  if not kinds.is_provider_backed(keyword.value) then
     return nil
   end
 

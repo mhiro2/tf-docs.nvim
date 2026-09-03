@@ -64,6 +64,182 @@ T["ts.get_context detects resource and anchor from key ="] = function()
   expect.equality(ctx.anchor_candidate, "tags")
 end
 
+T["ts.get_context detects additional provider-backed block kinds"] = function()
+  H.reset_state()
+  local ts = require("tf-docs.ts")
+  local cases = {
+    { kind = "ephemeral", type = "aws_ssm_parameter" },
+    { kind = "action", type = "aws_events_put_events" },
+    { kind = "list", type = "aws_vpc" },
+  }
+
+  for _, case in ipairs(cases) do
+    local lines = {
+      string.format('%s "%s" "example" {', case.kind, case.type),
+      "  provider = aws.west",
+      "  config {",
+      '    name = "example"',
+      "  }",
+      "}",
+    }
+    local ctx = H.with_scratch_buf({ lines = lines, cursor = { 4, 4 } }, function(bufnr)
+      return ts.get_context(bufnr)
+    end)
+
+    expect.equality(ctx.kind, case.kind)
+    expect.equality(ctx.type, case.type)
+    expect.equality(ctx.provider_hint, "aws")
+    expect.equality(ctx.anchor_candidate, "name")
+  end
+end
+
+T["ts.get_context recognizes additional kinds through Treesitter"] = function()
+  H.reset_state()
+  local ts = require("tf-docs.ts")
+  local line = 'action "aws_events_put_events" "publish" { provider = aws.west }'
+
+  local block_type = ast_node("identifier", text_range(line, "action", 0))
+  local type_label = ast_node("string_lit", text_range(line, '"aws_events_put_events"', 0))
+  local name_label = ast_node("string_lit", text_range(line, '"publish"', 0))
+  local provider_name = ast_node("identifier", text_range(line, "provider", 0))
+  local expression = ast_node("expression", text_range(line, "aws.west", 0))
+  local attribute = ast_node("attribute", { 0, 43, 0, #line - 2 }, { provider_name, expression })
+  local body = ast_node("body", { 0, 43, 0, #line - 2 }, { attribute })
+  local block = ast_node("block", { 0, 0, 0, #line }, { block_type, type_label, name_label, body })
+  local root_body = ast_node("body", { 0, 0, 0, #line }, { block })
+  local root = ast_node("config_file", { 0, 0, 0, #line }, { root_body })
+  root.named_descendant_for_range = function()
+    return provider_name
+  end
+
+  local ctx = H.with_treesitter({
+    get_parser = function()
+      return {
+        parse = function()
+          return {
+            {
+              root = function()
+                return root
+              end,
+            },
+          }
+        end,
+      }
+    end,
+  }, function()
+    return H.with_scratch_buf({ lines = { line }, cursor = { 1, 45 } }, function(bufnr)
+      return ts.get_context(bufnr)
+    end)
+  end)
+
+  expect.equality(ctx.kind, "action")
+  expect.equality(ctx.type, "aws_events_put_events")
+  expect.equality(ctx.provider_hint, "aws")
+end
+
+T["ts.get_context Treesitter keeps an action attribute as the anchor"] = function()
+  H.reset_state()
+  local ts = require("tf-docs.ts")
+  local lines = {
+    'resource "aws_route53_resolver_firewall_rule" "example" {',
+    '  action = "BLOCK"',
+    "}",
+  }
+
+  local attribute_name = ast_node("identifier", text_range(lines[2], "action", 1))
+  local expression = ast_node("expression", text_range(lines[2], '"BLOCK"', 1))
+  local attribute = ast_node("attribute", { 1, 2, 1, #lines[2] }, { attribute_name, expression })
+  local block_type = ast_node("identifier", text_range(lines[1], "resource", 0))
+  local type_label = ast_node("string_lit", text_range(lines[1], '"aws_route53_resolver_firewall_rule"', 0))
+  local name_label = ast_node("string_lit", text_range(lines[1], '"example"', 0))
+  local resource_body = ast_node("body", { 1, 0, 1, #lines[2] }, { attribute })
+  local resource = ast_node("block", { 0, 0, 2, 1 }, { block_type, type_label, name_label, resource_body })
+  local root_body = ast_node("body", { 0, 0, 2, 1 }, { resource })
+  local root = ast_node("config_file", { 0, 0, 2, 1 }, { root_body })
+  root.named_descendant_for_range = function()
+    return attribute_name
+  end
+
+  local ctx = H.with_treesitter({
+    get_parser = function()
+      return {
+        parse = function()
+          return {
+            {
+              root = function()
+                return root
+              end,
+            },
+          }
+        end,
+      }
+    end,
+  }, function()
+    return H.with_scratch_buf({ lines = lines, cursor = { 2, 2 } }, function(bufnr)
+      return ts.get_context(bufnr)
+    end)
+  end)
+
+  expect.equality(ctx.kind, "resource")
+  expect.equality(ctx.type, "aws_route53_resolver_firewall_rule")
+  expect.equality(ctx.anchor_candidate, "action")
+end
+
+T["ts.get_context Treesitter keeps a nested action block as the anchor"] = function()
+  H.reset_state()
+  local ts = require("tf-docs.ts")
+  local lines = {
+    'resource "aws_wafv2_web_acl" "example" {',
+    "  rule {",
+    "    action {",
+    "      block {}",
+    "    }",
+    "  }",
+    "}",
+  }
+
+  local action_type = ast_node("identifier", text_range(lines[3], "action", 2))
+  local action_body = ast_node("body", { 2, 11, 4, 5 })
+  local action_block = ast_node("block", { 2, 4, 4, 5 }, { action_type, action_body })
+  local rule_type = ast_node("identifier", text_range(lines[2], "rule", 1))
+  local rule_body = ast_node("body", { 1, 8, 5, 3 }, { action_block })
+  local rule_block = ast_node("block", { 1, 2, 5, 3 }, { rule_type, rule_body })
+  local block_type = ast_node("identifier", text_range(lines[1], "resource", 0))
+  local type_label = ast_node("string_lit", text_range(lines[1], '"aws_wafv2_web_acl"', 0))
+  local name_label = ast_node("string_lit", text_range(lines[1], '"example"', 0))
+  local resource_body = ast_node("body", { 0, 41, 6, 1 }, { rule_block })
+  local resource = ast_node("block", { 0, 0, 6, 1 }, { block_type, type_label, name_label, resource_body })
+  local root_body = ast_node("body", { 0, 0, 6, 1 }, { resource })
+  local root = ast_node("config_file", { 0, 0, 6, 1 }, { root_body })
+  root.named_descendant_for_range = function()
+    return action_type
+  end
+
+  local ctx = H.with_treesitter({
+    get_parser = function()
+      return {
+        parse = function()
+          return {
+            {
+              root = function()
+                return root
+              end,
+            },
+          }
+        end,
+      }
+    end,
+  }, function()
+    return H.with_scratch_buf({ lines = lines, cursor = { 3, 4 } }, function(bufnr)
+      return ts.get_context(bufnr)
+    end)
+  end)
+
+  expect.equality(ctx.kind, "resource")
+  expect.equality(ctx.type, "aws_wafv2_web_acl")
+  expect.equality(ctx.anchor_candidate, "action")
+end
+
 T["ts.get_context detects anchor from block {"] = function()
   H.reset_state()
   local ts = require("tf-docs.ts")
@@ -617,6 +793,36 @@ T["ts.get_context fallback returns nil outside the preceding block"] = function(
   expect.equality(ctx, nil)
 end
 
+T["ts.get_context fallback keeps action attributes and nested blocks as anchors"] = function()
+  H.reset_state()
+  local ts = require("tf-docs.ts")
+  local lines = {
+    'resource "aws_route53_resolver_firewall_rule" "example" {',
+    '  action = "BLOCK"',
+    "}",
+    "",
+    'resource "aws_wafv2_web_acl" "example" {',
+    "  rule {",
+    "    action {",
+    "      block {}",
+    "    }",
+    "  }",
+    "}",
+  }
+
+  local contexts = H.with_no_treesitter(function()
+    return H.with_scratch_buf({ lines = lines }, function(bufnr)
+      return {
+        attribute = ts.get_context(bufnr, { 2, 2 }),
+        nested_block = ts.get_context(bufnr, { 7, 4 }),
+      }
+    end)
+  end)
+
+  expect.equality(contexts.attribute.anchor_candidate, "action")
+  expect.equality(contexts.nested_block.anchor_candidate, "action")
+end
+
 T["ts.get_context fallback works with large files"] = function()
   H.reset_state()
   local ts = require("tf-docs.ts")
@@ -891,7 +1097,7 @@ T["ts.clear_context_cache drops all cached contexts"] = function()
   expect.equality(parse_calls, 2)
 end
 
-T["ts.list_resources returns all resources and data sources"] = function()
+T["ts.list_resources returns all supported blocks"] = function()
   H.reset_state()
   local ts = require("tf-docs.ts")
   local lines = {
@@ -906,12 +1112,16 @@ T["ts.list_resources returns all resources and data sources"] = function()
     'module "vpc" {',
     '  source = "terraform-aws-modules/vpc/aws"',
     "}",
+    "",
+    'ephemeral "aws_ssm_parameter" "secret" {}',
+    'action "aws_events_put_events" "publish" {}',
+    'list "aws_vpc" "existing" { provider = aws }',
   }
   local resources = H.with_scratch_buf({ lines = lines }, function(bufnr)
     return ts.list_resources(bufnr)
   end)
 
-  expect.equality(#resources, 3)
+  expect.equality(#resources, 6)
   expect.equality(resources[1].kind, "resource")
   expect.equality(resources[1].type, "aws_instance")
   expect.equality(resources[1].name, "web")
@@ -926,6 +1136,18 @@ T["ts.list_resources returns all resources and data sources"] = function()
   expect.equality(resources[3].name, "vpc")
   expect.equality(resources[3].line, 9)
   expect.equality(resources[3].col, 0)
+  expect.equality(resources[4].kind, "ephemeral")
+  expect.equality(resources[4].type, "aws_ssm_parameter")
+  expect.equality(resources[4].name, "secret")
+  expect.equality(resources[4].line, 13)
+  expect.equality(resources[5].kind, "action")
+  expect.equality(resources[5].type, "aws_events_put_events")
+  expect.equality(resources[5].name, "publish")
+  expect.equality(resources[5].line, 14)
+  expect.equality(resources[6].kind, "list")
+  expect.equality(resources[6].type, "aws_vpc")
+  expect.equality(resources[6].name, "existing")
+  expect.equality(resources[6].line, 15)
 end
 
 T["ts.list_resources returns empty table when no resources found"] = function()

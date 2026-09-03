@@ -1,8 +1,9 @@
 local M = {}
 local hcl = require("tf-docs.hcl")
+local kinds = require("tf-docs.kinds")
 
 ---@class TfDocsContext
----@field kind "resource"|"data"|"module"
+---@field kind TfDocsBlockKind
 ---@field type string|nil
 ---@field module_source string|nil
 ---@field module_source_reason string|nil
@@ -64,10 +65,6 @@ local function set_cached_context(bufnr, cursor, context)
     context = context,
   }
 end
-
--- Block keywords are never valid anchor candidates (they introduce a block,
--- not an argument/attribute), so exclude them in one place.
-local BLOCK_KEYWORDS = { resource = true, data = true, module = true }
 
 ---@param node userdata|table
 ---@return (userdata|table)[]
@@ -230,7 +227,7 @@ local function context_from_ast(bufnr, node)
       local block = ast_block(bufnr, current)
       local top_level = is_top_level_block(current)
 
-      if block and top_level and BLOCK_KEYWORDS[block.block_type] then
+      if block and top_level and kinds.is_supported(block.block_type) then
         local kind = block.block_type
         local required_labels = kind == "module" and 1 or 2
         if #block.labels < required_labels then
@@ -272,7 +269,7 @@ local function context_from_ast(bufnr, node)
         }
       end
 
-      if block and not anchor and not BLOCK_KEYWORDS[block.block_type] then
+      if block and not anchor then
         anchor = block.block_type
       end
     end
@@ -367,7 +364,6 @@ local function anchor_from_structure(structure, block, row, col)
       token.col >= min_col
       and token.col <= max_col
       and token.kind == "ident"
-      and not BLOCK_KEYWORDS[token.value]
       and next_token
       and next_token.col <= (row == block.end_line and block.end_col or math.huge)
       and next_token.kind == "symbol"
@@ -473,7 +469,7 @@ function M.clear_context_cache()
 end
 
 ---@class TfDocsResource
----@field kind "resource"|"data"|"module"
+---@field kind TfDocsBlockKind
 ---@field type string|nil
 ---@field name string
 ---@field line number

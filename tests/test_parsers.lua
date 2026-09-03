@@ -168,8 +168,8 @@ end
 T["url builder creates resource and data URLs"] = function()
   H.reset_state()
   local url = require("tf-docs.url")
-  local resource = url.resource_url("hashicorp/aws", "1.2.3", "aws_instance", "aws")
-  local data = url.data_url("hashicorp/aws", "1.2.3", "aws_ami", "aws")
+  local resource = url.provider_doc_url("resource", "hashicorp/aws", "1.2.3", "aws_instance", "aws")
+  local data = url.provider_doc_url("data", "hashicorp/aws", "1.2.3", "aws_ami", "aws")
   expect.equality(resource, "https://registry.terraform.io/providers/hashicorp/aws/1.2.3/docs/resources/instance")
   expect.equality(data, "https://registry.terraform.io/providers/hashicorp/aws/1.2.3/docs/data-sources/ami")
 end

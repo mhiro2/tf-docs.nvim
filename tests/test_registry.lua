@@ -117,6 +117,33 @@ T["resolve_cached_url returns corrected URL only when cached and applicable"] = 
   expect.equality(registry.resolve_cached_url({ kind = nil }, "https://example.com/x"), "https://example.com/x")
 end
 
+T["resolve_cached_url uses the Registry category for every provider-backed kind"] = function()
+  H.reset_state()
+  local registry = require("tf-docs.registry")
+  local cache = require("tf-docs.cache")
+  local categories = {
+    resource = "resources",
+    data = "data-sources",
+    ephemeral = "ephemeral-resources",
+    action = "actions",
+    list = "list-resources",
+  }
+
+  for kind, category in pairs(categories) do
+    local fallback = "https://registry.terraform.io/providers/hashicorp/aws/9.9.9/docs/" .. category .. "/ssm_parameter"
+    cache.set_slug(registry._cache_key("hashicorp/aws", "9.9.9", category, "aws_ssm_parameter"), "aws_ssm_parameter")
+    expect.equality(
+      registry.resolve_cached_url({
+        kind = kind,
+        provider_source = "hashicorp/aws",
+        provider_version = "9.9.9",
+        type = "aws_ssm_parameter",
+      }, fallback),
+      "https://registry.terraform.io/providers/hashicorp/aws/9.9.9/docs/" .. category .. "/aws_ssm_parameter"
+    )
+  end
+end
+
 T["resolve_url falls back synchronously when not applicable"] = function()
   H.reset_state()
   local registry = require("tf-docs.registry")
