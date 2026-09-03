@@ -179,21 +179,21 @@ function M.list(bufnr, opts)
   end
 
   local changedtick = vim.api.nvim_buf_get_changedtick(bufnr)
-  local resources = ts.list_resources(bufnr)
-  if #resources == 0 then
+  local blocks = ts.list_blocks(bufnr)
+  if #blocks == 0 then
     log.log(config.get(), "warn", "No supported Terraform blocks found in current buffer")
     return
   end
 
   local items = {}
-  for _, r in ipairs(resources) do
+  for _, block in ipairs(blocks) do
     local label
-    if r.kind == "module" then
-      label = string.format("[%s] %s (line %d)", r.kind, r.name, r.line)
+    if block.kind == "module" then
+      label = string.format("[%s] %s (line %d)", block.kind, block.name, block.line)
     else
-      label = string.format("[%s] %s (line %d)", r.kind, r.type, r.line)
+      label = string.format("[%s] %s (line %d)", block.kind, block.type, block.line)
     end
-    table.insert(items, { label = label, resource = r })
+    table.insert(items, { label = label, block = block })
   end
 
   ui.select(items, {
@@ -215,8 +215,8 @@ function M.list(bufnr, opts)
       return
     end
 
-    local r = selected.resource
-    local context = ts.get_context(bufnr, { r.line, r.col })
+    local block = selected.block
+    local context = ts.get_context(bufnr, { block.line, block.col })
     if not context then
       notify_unresolved({ reason = "list-context-unresolved" })
       return

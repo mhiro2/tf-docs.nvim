@@ -468,7 +468,7 @@ function M.clear_context_cache()
   context_cache = {}
 end
 
----@class TfDocsResource
+---@class TfDocsBlock
 ---@field kind TfDocsBlockKind
 ---@field type string|nil
 ---@field name string
@@ -476,8 +476,8 @@ end
 ---@field col number
 
 ---@param bufnr number
----@return TfDocsResource[]
-function M.list_resources(bufnr)
+---@return TfDocsBlock[]
+function M.list_blocks(bufnr)
   local results = {}
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local structure = hcl.scan_structure(lines)

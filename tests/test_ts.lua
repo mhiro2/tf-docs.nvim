@@ -685,7 +685,7 @@ T["ts.get_context fallback uses columns for adjacent one-line blocks"] = functio
         between = ts.get_context(bufnr, { 1, first_close + 1 }),
         second = ts.get_context(bufnr, { 1, second_inside }),
         after = ts.get_context(bufnr, { 1, second_close + 1 }),
-        listed = ts.list_resources(bufnr),
+        listed = ts.list_blocks(bufnr),
       }
     end)
   end)
@@ -767,7 +767,7 @@ T["ts scanner ends indented heredocs at tab-indented delimiters"] = function()
     return H.with_scratch_buf({ lines = lines }, function(bufnr)
       return {
         context = ts.get_context(bufnr, { 7, 2 }),
-        listed = ts.list_resources(bufnr),
+        listed = ts.list_blocks(bufnr),
       }
     end)
   end)
@@ -1097,7 +1097,7 @@ T["ts.clear_context_cache drops all cached contexts"] = function()
   expect.equality(parse_calls, 2)
 end
 
-T["ts.list_resources returns all supported blocks"] = function()
+T["ts.list_blocks returns all supported blocks"] = function()
   H.reset_state()
   local ts = require("tf-docs.ts")
   local lines = {
@@ -1118,7 +1118,7 @@ T["ts.list_resources returns all supported blocks"] = function()
     'list "aws_vpc" "existing" { provider = aws }',
   }
   local resources = H.with_scratch_buf({ lines = lines }, function(bufnr)
-    return ts.list_resources(bufnr)
+    return ts.list_blocks(bufnr)
   end)
 
   expect.equality(#resources, 6)
@@ -1150,7 +1150,7 @@ T["ts.list_resources returns all supported blocks"] = function()
   expect.equality(resources[6].line, 15)
 end
 
-T["ts.list_resources returns empty table when no resources found"] = function()
+T["ts.list_blocks returns empty table when no blocks found"] = function()
   H.reset_state()
   local ts = require("tf-docs.ts")
   local lines = {
@@ -1158,13 +1158,13 @@ T["ts.list_resources returns empty table when no resources found"] = function()
     'variable "foo" {}',
   }
   local resources = H.with_scratch_buf({ lines = lines }, function(bufnr)
-    return ts.list_resources(bufnr)
+    return ts.list_blocks(bufnr)
   end)
 
   expect.equality(#resources, 0)
 end
 
-T["ts.list_resources ignores false headers and accepts a comment-split header"] = function()
+T["ts.list_blocks ignores false headers and accepts a comment-split header"] = function()
   H.reset_state()
   local ts = require("tf-docs.ts")
   local lines = {
@@ -1186,7 +1186,7 @@ T["ts.list_resources ignores false headers and accepts a comment-split header"] 
   }
 
   local resources = H.with_scratch_buf({ lines = lines }, function(bufnr)
-    return ts.list_resources(bufnr)
+    return ts.list_blocks(bufnr)
   end)
 
   expect.equality(#resources, 2)
