@@ -218,4 +218,72 @@ T["ui backend detection is cached after first auto-detect"] = function()
   expect.equality(second, "external")
 end
 
+T["ui.select forwards kind to vim.ui.select when backend is vim"] = function()
+  H.reset_state()
+  local config = require("tf-docs.config")
+  local ui = require("tf-docs.ui")
+
+  config.setup({ ui_select_backend = "vim" })
+
+  local saved_select = vim.ui.select
+  local observed
+  vim.ui.select = function(items, opts, on_choice)
+    observed = { items = items, opts = opts }
+    on_choice(items[2])
+  end
+
+  local chosen
+  ui.select({ "a", "b" }, {
+    prompt = "Pick:",
+    kind = ui.SELECT_KIND,
+    format_item = function(item)
+      return item
+    end,
+  }, function(item)
+    chosen = item
+  end)
+
+  vim.ui.select = saved_select
+
+  expect.equality(observed.items, { "a", "b" })
+  expect.equality(observed.opts.kind, "tf-docs")
+  expect.equality(observed.opts.prompt, "Pick:")
+  expect.equality(chosen, "b")
+end
+
+T["ui.select vim backend bypasses external plugin detection"] = function()
+  H.reset_state()
+  local config = require("tf-docs.config")
+  local ui = require("tf-docs.ui")
+  local backend = require("tf-docs.ui_backend")
+
+  config.setup({ ui_select_backend = "vim" })
+  backend._clear_cache_for_test()
+
+  local saved_select = vim.ui.select
+  local called = false
+  vim.ui.select = function(items, _, on_choice)
+    called = true
+    on_choice(items[1])
+  end
+
+  local saved_detect = backend.detect_auto_backend
+  backend.detect_auto_backend = function()
+    error("detect_auto_backend should not run for the vim backend")
+  end
+
+  local ok = pcall(ui.select, { "only" }, {
+    prompt = "Pick:",
+    format_item = function(item)
+      return item
+    end,
+  }, function() end)
+
+  backend.detect_auto_backend = saved_detect
+  vim.ui.select = saved_select
+
+  expect.equality(ok, true)
+  expect.equality(called, true)
+end
+
 return T

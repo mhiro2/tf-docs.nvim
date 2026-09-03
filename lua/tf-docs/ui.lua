@@ -244,14 +244,19 @@ local function close_select()
   select_callback_ = nil
 end
 
+---Value passed as `opts.kind` to `vim.ui.select` so picker plugins and user
+---wrappers can recognize tf-docs prompts and apply their own theme/behavior.
+M.SELECT_KIND = "tf-docs"
+
 ---@param items any[]
----@param opts { prompt: string, format_item: fun(item: any): string }
+---@param opts { prompt: string, kind?: string, format_item: fun(item: any): string }
 ---@param on_choice fun(item: any|nil)
 function M.select(items, opts, on_choice)
   local cfg = config.get()
   local backend = cfg.ui_select_backend or "auto"
 
-  if backend == "auto" and ui_backend.detect_auto_backend() == "external" and vim.ui and vim.ui.select then
+  local use_vim_ui_select = backend == "vim" or (backend == "auto" and ui_backend.detect_auto_backend() == "external")
+  if use_vim_ui_select and vim.ui and vim.ui.select then
     vim.ui.select(items, opts, on_choice)
     return
   end

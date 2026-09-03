@@ -594,6 +594,68 @@ T["public API list() snapshots scopes across a delayed selection"] = function()
   end)
 end
 
+T["TfDocList builds aligned picker-friendly labels and passes kind"] = function()
+  H.reset_state()
+  local plugin = require("tf-docs")
+  local ts = require("tf-docs.ts")
+  local ui = require("tf-docs.ui")
+
+  plugin.setup()
+
+  local items = plugin._format_list_items({
+    { kind = "resource", type = "aws_instance", name = "web", line = 3, col = 0 },
+    { kind = "data", type = "aws_ami", name = "ubuntu", line = 12, col = 0 },
+    { kind = "ephemeral", type = "aws_secretsmanager_secret_version", name = "db", line = 20, col = 0 },
+    { kind = "module", type = nil, name = "vpc", line = 31, col = 0 },
+  })
+
+  expect.equality(
+    vim.tbl_map(function(item)
+      return item.label
+    end, items),
+    {
+      "resource   aws_instance.web                      (line 3)",
+      "data       aws_ami.ubuntu                        (line 12)",
+      "ephemeral  aws_secretsmanager_secret_version.db  (line 20)",
+      "module     vpc                                   (line 31)",
+    }
+  )
+
+  H.with_scratch_buf({
+    lines = {
+      'resource "aws_instance" "web" {',
+      "}",
+    },
+  }, function(bufnr)
+    local observed
+    H.with_patches({
+      {
+        target = ts,
+        key = "list_blocks",
+        value = function()
+          return {
+            { kind = "resource", type = "aws_instance", name = "web", line = 1, col = 0 },
+          }
+        end,
+      },
+      {
+        target = ui,
+        key = "select",
+        value = function(items_, opts)
+          observed = { items = items_, opts = opts }
+        end,
+      },
+    }, function()
+      vim.api.nvim_set_current_buf(bufnr)
+      vim.api.nvim_cmd({ cmd = "TfDocList" }, {})
+    end)
+
+    expect.equality(observed.opts.kind, "tf-docs")
+    expect.equality(observed.opts.prompt, "Select a Terraform block to open docs:")
+    expect.equality(observed.opts.format_item(observed.items[1]), "resource  aws_instance.web  (line 1)")
+  end)
+end
+
 T["TfDocList resolves its selection against the originating buffer"] = function()
   H.reset_state()
   local plugin = require("tf-docs")

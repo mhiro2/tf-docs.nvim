@@ -16,7 +16,7 @@
 ---@field enable_registry_lookup boolean
 ---@field registry_timeout_ms number
 ---@field log_level string
----@field ui_select_backend "auto"|"builtin"
+---@field ui_select_backend "auto"|"builtin"|"vim"
 
 --- Partial configuration accepted by setup(). Every field is optional; omitted
 --- fields fall back to the defaults, so passing e.g. { default_version = "x" }
@@ -33,7 +33,7 @@
 ---@field enable_registry_lookup? boolean
 ---@field registry_timeout_ms? number
 ---@field log_level? "debug"|"info"|"warn"|"error"
----@field ui_select_backend? "auto"|"builtin"
+---@field ui_select_backend? "auto"|"builtin"|"vim"
 
 local M = {}
 
@@ -147,7 +147,7 @@ local function validate(cfg)
     cfg.registry_timeout_ms = math.floor(timeout)
   end
 
-  local valid_backends = { auto = true, builtin = true }
+  local valid_backends = { auto = true, builtin = true, vim = true }
   if not valid_backends[cfg.ui_select_backend] then
     warn(
       string.format(
