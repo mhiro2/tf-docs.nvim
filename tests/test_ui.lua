@@ -286,4 +286,47 @@ T["ui.select vim backend bypasses external plugin detection"] = function()
   expect.equality(called, true)
 end
 
+T["ui backend detects fzf-lua through its ui_select provider"] = function()
+  H.reset_state()
+  local backend = require("tf-docs.ui_backend")
+
+  local saved = {
+    telescope = package.loaded["telescope"],
+    ext = package.loaded["telescope._extensions.ui-select"],
+    fzf = package.loaded["fzf-lua"],
+    provider = package.loaded["fzf-lua.providers.ui_select"],
+    snacks = package.loaded["snacks.picker"],
+  }
+  package.loaded["telescope"] = nil
+  package.loaded["telescope._extensions.ui-select"] = nil
+  package.loaded["snacks.picker"] = nil
+
+  package.loaded["fzf-lua"] = {}
+  package.loaded["fzf-lua.providers.ui_select"] = {
+    is_registered = function()
+      return false
+    end,
+  }
+  backend._clear_cache_for_test()
+  local unregistered = backend.detect_auto_backend()
+
+  package.loaded["fzf-lua.providers.ui_select"] = {
+    is_registered = function()
+      return true
+    end,
+  }
+  backend._clear_cache_for_test()
+  local registered = backend.detect_auto_backend()
+
+  package.loaded["telescope"] = saved.telescope
+  package.loaded["telescope._extensions.ui-select"] = saved.ext
+  package.loaded["fzf-lua"] = saved.fzf
+  package.loaded["fzf-lua.providers.ui_select"] = saved.provider
+  package.loaded["snacks.picker"] = saved.snacks
+  backend._clear_cache_for_test()
+
+  expect.equality(unregistered, "builtin")
+  expect.equality(registered, "external")
+end
+
 return T

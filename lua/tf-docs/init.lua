@@ -167,6 +167,19 @@ function M.peek(bufnr, opts)
   ui.peek(trace)
 end
 
+---Pad `text` with spaces up to `width` display cells. Uses display width
+---rather than byte length so multibyte identifiers keep the columns aligned.
+---@param text string
+---@param width number
+---@return string
+local function pad_display(text, width)
+  local gap = width - vim.api.nvim_strwidth(text)
+  if gap <= 0 then
+    return text
+  end
+  return text .. string.rep(" ", gap)
+end
+
 ---Build picker-friendly labels for the blocks returned by `ts.list_blocks`.
 ---
 ---Labels use aligned columns so they read well in fuzzy pickers and the
@@ -187,16 +200,16 @@ function M._format_list_items(blocks)
       address = block.type
     end
     addresses[i] = address
-    kind_width = math.max(kind_width, #block.kind)
-    address_width = math.max(address_width, #address)
+    kind_width = math.max(kind_width, vim.api.nvim_strwidth(block.kind))
+    address_width = math.max(address_width, vim.api.nvim_strwidth(address))
   end
 
   local items = {}
   for i, block in ipairs(blocks) do
     local label = string.format(
-      "%-" .. kind_width .. "s  %-" .. address_width .. "s  (line %d)",
-      block.kind,
-      addresses[i],
+      "%s  %s  (line %d)",
+      pad_display(block.kind, kind_width),
+      pad_display(addresses[i], address_width),
       block.line
     )
     table.insert(items, { label = label, block = block })

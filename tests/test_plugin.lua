@@ -607,6 +607,7 @@ T["TfDocList builds aligned picker-friendly labels and passes kind"] = function(
     { kind = "data", type = "aws_ami", name = "ubuntu", line = 12, col = 0 },
     { kind = "ephemeral", type = "aws_secretsmanager_secret_version", name = "db", line = 20, col = 0 },
     { kind = "module", type = nil, name = "vpc", line = 31, col = 0 },
+    { kind = "module", type = nil, name = "日本語", line = 40, col = 0 },
   })
 
   expect.equality(
@@ -618,6 +619,7 @@ T["TfDocList builds aligned picker-friendly labels and passes kind"] = function(
       "data       aws_ami.ubuntu                        (line 12)",
       "ephemeral  aws_secretsmanager_secret_version.db  (line 20)",
       "module     vpc                                   (line 31)",
+      "module     日本語                                (line 40)",
     }
   )
 

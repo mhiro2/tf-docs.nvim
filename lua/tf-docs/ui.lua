@@ -373,13 +373,10 @@ function M.select(items, opts, on_choice)
         set_mark(line_num, 0, num_end, "Number")
         -- Highlight colon separator
         set_mark(line_num, num_end - 1, num_end + 1, "Delimiter")
-        -- Highlight label (resource type like [data], [resource], [module])
-        local kind_start = text:find("%[")
+        -- Highlight the leading kind column (resource, data, module, ...)
+        local kind_start, kind_end = text:find("%a+", num_end + 1)
         if kind_start then
-          local kind_end = text:find("%]", kind_start)
-          if kind_end then
-            set_mark(line_num, kind_start - 1, kind_end + 1, "Type")
-          end
+          set_mark(line_num, kind_start - 1, kind_end, "Type")
         end
       end
     end
