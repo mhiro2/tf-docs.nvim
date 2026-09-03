@@ -39,7 +39,7 @@ local function expect_stale_list_abort(mutate, expected_message)
       H.with_patches({
         {
           target = ts,
-          key = "list_resources",
+          key = "list_blocks",
           value = function(bufnr)
             expect.equality(bufnr, source_buf)
             return {
@@ -429,7 +429,7 @@ T["public API list() propagates scopes without moving the cursor"] = function()
     H.with_patches({
       {
         target = ts,
-        key = "list_resources",
+        key = "list_blocks",
         value = function()
           return {
             { kind = "resource", type = "aws_ami", name = "y", line = 4, col = 6 },
@@ -507,7 +507,7 @@ T["public API list() snapshots scopes across a delayed selection"] = function()
     H.with_patches({
       {
         target = ts,
-        key = "list_resources",
+        key = "list_blocks",
         value = function(bufnr)
           expect.equality(bufnr, source_bufnr)
           return { { kind = "resource", type = "aws_instance", name = "x", line = 1, col = 0 } }
@@ -623,7 +623,7 @@ T["TfDocList resolves its selection against the originating buffer"] = function(
       H.with_patches({
         {
           target = ts,
-          key = "list_resources",
+          key = "list_blocks",
           value = function(bufnr)
             observed.list = bufnr
             return {
@@ -715,7 +715,7 @@ T["TfDocList does not resolve when selection is cancelled"] = function()
     H.with_patches({
       {
         target = ts,
-        key = "list_resources",
+        key = "list_blocks",
         value = function()
           return {
             { kind = "resource", type = "aws_instance", name = "x", line = 1, col = 0 },
@@ -776,7 +776,7 @@ T["TfDocList uses the configured scope resolver"] = function()
     H.with_patches({
       {
         target = ts,
-        key = "list_resources",
+        key = "list_blocks",
         value = function()
           return { { kind = "module", name = "vpc", line = 1 } }
         end,
@@ -1131,7 +1131,7 @@ T["TfDocOpen maps unresolved reason to user-facing message"] = function()
   expect.equality(open_calls, 0)
   expect.equality(#logs, 1)
   expect.equality(logs[1].level, "warn")
-  expect.equality(logs[1].msg, "Unable to infer provider from resource/data type under cursor")
+  expect.equality(logs[1].msg, "Unable to infer provider from block type under cursor")
 end
 
 T["TfDocOpen still opens but notifies (info) when a version fallback is used"] = function()

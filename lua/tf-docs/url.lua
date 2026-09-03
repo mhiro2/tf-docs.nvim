@@ -1,4 +1,5 @@
 local M = {}
+local kinds = require("tf-docs.kinds")
 
 local BUILTIN_DOCS = {
   resource = {
@@ -17,10 +18,6 @@ function M.builtin_url(kind, type_name)
   return by_type and type_name and by_type[type_name] or nil
 end
 
-local function escape_lua_pattern(str)
-  return str:gsub("([^%w])", "%%%1")
-end
-
 ---@param source string
 ---@param version string
 ---@return string
@@ -28,38 +25,33 @@ function M.provider_base(source, version)
   return string.format("https://registry.terraform.io/providers/%s/%s/docs", source, version)
 end
 
----@param source string
----@param version string
----@param type_name string
----@param type_prefix string
----@return string
-function M.resource_url(source, version, type_name, type_prefix)
-  local prefix = escape_lua_pattern(type_prefix) .. "_"
-  local resource = type_name:gsub("^" .. prefix, "")
-  return M.provider_base(source, version) .. "/resources/" .. resource
-end
-
----@param source string
----@param version string
----@param type_name string
----@param type_prefix string
----@return string
-function M.data_url(source, version, type_name, type_prefix)
-  local prefix = escape_lua_pattern(type_prefix) .. "_"
-  local data_name = type_name:gsub("^" .. prefix, "")
-  return M.provider_base(source, version) .. "/data-sources/" .. data_name
-end
-
 ---Build a docs URL from an explicit, already-resolved slug. Unlike
----resource_url/data_url, this does NOT strip the provider prefix, so it can
+---provider_doc_url, this does NOT strip the provider prefix, so it can
 ---express slugs that keep it (e.g. hashicorp/google's `google_service_account`).
 ---@param source string
 ---@param version string
----@param category string "resources" | "data-sources"
+---@param category TfDocsCategory
 ---@param slug string
 ---@return string
 function M.docs_url(source, version, category, slug)
   return M.provider_base(source, version) .. "/" .. category .. "/" .. slug
+end
+
+---@param kind string
+---@param source string
+---@param version string
+---@param type_name string
+---@param type_prefix string
+---@return string|nil
+function M.provider_doc_url(kind, source, version, type_name, type_prefix)
+  local category = kinds.docs_category(kind)
+  if not category then
+    return nil
+  end
+
+  local prefix = type_prefix:gsub("([^%w])", "%%%1") .. "_"
+  local slug = type_name:gsub("^" .. prefix, "")
+  return M.docs_url(source, version, category, slug)
 end
 
 local function strip_module_suffixes(source)

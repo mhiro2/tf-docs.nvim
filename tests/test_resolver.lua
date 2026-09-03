@@ -53,6 +53,36 @@ T["resolver infers provider prefix using first underscore"] = function()
   expect.equality(trace.provider_source, "hashicorp/aws")
 end
 
+T["resolver supports every provider-backed block kind"] = function()
+  H.reset_state()
+  local config = require("tf-docs.config")
+  config.setup({
+    default_version = "9.9.9",
+  })
+
+  local resolver = require("tf-docs.resolver")
+  local cases = {
+    { kind = "resource", type = "aws_instance", path = "resources/instance" },
+    { kind = "data", type = "aws_ami", path = "data-sources/ami" },
+    { kind = "ephemeral", type = "aws_ssm_parameter", path = "ephemeral-resources/ssm_parameter" },
+    { kind = "action", type = "aws_events_put_events", path = "actions/events_put_events" },
+    { kind = "list", type = "aws_vpc", path = "list-resources/vpc" },
+  }
+  for _, case in ipairs(cases) do
+    local resolved_url, trace = resolver.resolve(0, {
+      context = {
+        kind = case.kind,
+        type = case.type,
+        anchor_candidate = nil,
+      },
+    })
+
+    expect.equality(resolved_url, "https://registry.terraform.io/providers/hashicorp/aws/9.9.9/docs/" .. case.path)
+    expect.equality(trace.kind, case.kind)
+    expect.equality(trace.provider_source, "hashicorp/aws")
+  end
+end
+
 T["resolver supports provider_overrides without breaking type prefix stripping"] = function()
   H.reset_state()
   local config = require("tf-docs.config")

@@ -139,12 +139,7 @@ function M.resolve(bufnr, opts)
     end
   end
 
-  local base_url
-  if context.kind == "resource" then
-    base_url = url.resource_url(source, version, context.type, type_prefix)
-  elseif context.kind == "data" then
-    base_url = url.data_url(source, version, context.type, type_prefix)
-  end
+  local base_url = context.type and url.provider_doc_url(context.kind, source, version, context.type, type_prefix)
 
   if not base_url then
     trace.reason = "url-unresolved"

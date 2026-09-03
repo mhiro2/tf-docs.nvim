@@ -30,14 +30,14 @@ end
 
 ---@type table<string, string>
 local unresolved_reason_messages = {
-  ["no-context"] = "No terraform resource/data/module under cursor",
+  ["no-context"] = "No supported Terraform block under cursor",
   ["module-disabled"] = "Module docs are disabled by configuration (enable_module_docs=false)",
   ["module-source-expression"] = "Module source is not a static quoted literal",
   ["module-source-missing"] = "Module block has no source attribute",
   ["module-source-unresolved"] = "Unable to resolve module source URL under cursor",
-  ["provider-unresolved"] = "Unable to infer provider from resource/data type under cursor",
+  ["provider-unresolved"] = "Unable to infer provider from block type under cursor",
   ["url-unresolved"] = "Unable to build Terraform docs URL from current context",
-  ["list-context-unresolved"] = "Unable to resolve context for the selected terraform block",
+  ["list-context-unresolved"] = "Unable to resolve context for the selected Terraform block",
   ["list-buffer-unavailable"] = "The Terraform buffer was closed while selecting; run :TfDocList again",
   ["list-buffer-changed"] = "The Terraform buffer changed while selecting; run :TfDocList again",
 }
@@ -167,7 +167,7 @@ function M.peek(bufnr, opts)
   ui.peek(trace)
 end
 
----List resource/data/module blocks in the buffer and open docs for the choice.
+---List supported Terraform blocks in the buffer and open docs for the choice.
 ---@param bufnr? number Buffer to list (defaults to the current buffer).
 ---@param opts? TfDocsScopeOpts Explicit scope overrides.
 function M.list(bufnr, opts)
@@ -179,25 +179,25 @@ function M.list(bufnr, opts)
   end
 
   local changedtick = vim.api.nvim_buf_get_changedtick(bufnr)
-  local resources = ts.list_resources(bufnr)
-  if #resources == 0 then
-    log.log(config.get(), "warn", "No terraform resources/data/modules found in current buffer")
+  local blocks = ts.list_blocks(bufnr)
+  if #blocks == 0 then
+    log.log(config.get(), "warn", "No supported Terraform blocks found in current buffer")
     return
   end
 
   local items = {}
-  for _, r in ipairs(resources) do
+  for _, block in ipairs(blocks) do
     local label
-    if r.kind == "module" then
-      label = string.format("[%s] %s (line %d)", r.kind, r.name, r.line)
+    if block.kind == "module" then
+      label = string.format("[%s] %s (line %d)", block.kind, block.name, block.line)
     else
-      label = string.format("[%s] %s (line %d)", r.kind, r.type, r.line)
+      label = string.format("[%s] %s (line %d)", block.kind, block.type, block.line)
     end
-    table.insert(items, { label = label, resource = r })
+    table.insert(items, { label = label, block = block })
   end
 
   ui.select(items, {
-    prompt = "Select a resource to open docs:",
+    prompt = "Select a Terraform block to open docs:",
     format_item = function(item)
       return item.label
     end,
@@ -215,8 +215,8 @@ function M.list(bufnr, opts)
       return
     end
 
-    local r = selected.resource
-    local context = ts.get_context(bufnr, { r.line, r.col })
+    local block = selected.block
+    local context = ts.get_context(bufnr, { block.line, block.col })
     if not context then
       notify_unresolved({ reason = "list-context-unresolved" })
       return
@@ -314,7 +314,7 @@ local function create_commands()
 
   vim.api.nvim_create_user_command("TfDocList", function()
     M.list(0)
-  end, { desc = "tf-docs: list resource/data/module blocks and open docs for a choice" })
+  end, { desc = "tf-docs: list supported Terraform blocks and open docs for a choice" })
 
   commands_created = true
 end

@@ -1,12 +1,12 @@
 -- Terraform Registry v2 API client.
 --
 -- Why this exists: the registry's doc-page slug is NOT a deterministic
--- transformation of the resource/data type. It is literally the filename the
--- provider authors chose. Most hashicorp/google resources drop the provider
--- prefix (google_compute_instance -> "compute_instance"), but some keep it
--- (google_service_account -> "google_service_account"), and the same name can
--- differ between resource and data source. The heuristic in url.lua (strip the
--- prefix) is therefore wrong for those.
+-- transformation of the provider-backed block type. It is literally the
+-- filename the provider authors chose. Most hashicorp/google resources drop
+-- the provider prefix (google_compute_instance -> "compute_instance"), but
+-- some keep it (google_service_account -> "google_service_account"), and
+-- slugs can differ between documentation categories. The heuristic in url.lua
+-- (strip the prefix) is therefore wrong for those.
 --
 -- This module asks the registry for the real slug. Resolution is async and is
 -- raced against a timeout: on a warm cache the correct URL is returned
@@ -16,14 +16,12 @@
 
 local cache = require("tf-docs.cache")
 local config = require("tf-docs.config")
+local kinds = require("tf-docs.kinds")
 local url = require("tf-docs.url")
 
 local M = {}
 
 local API_BASE = "https://registry.terraform.io/v2"
-
----@type table<string, string>
-local CATEGORY = { resource = "resources", data = "data-sources" }
 
 -- Public-registry provider address ("namespace/name"). Public registry
 -- namespaces and types are [A-Za-z0-9-] only, so we restrict to that: it keeps
@@ -243,7 +241,7 @@ end
 ---@param cfg TfDocsConfig
 ---@return string? category, string? source, string? version, string? type_name
 local function applicable(trace, cfg)
-  local category = trace and trace.kind and CATEGORY[trace.kind]
+  local category = trace and kinds.docs_category(trace.kind)
   local source = trace and trace.provider_source
   local version = trace and trace.provider_version
   local type_name = trace and trace.type
