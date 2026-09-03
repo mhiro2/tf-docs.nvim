@@ -28,14 +28,14 @@ This is designed to eliminate repeated Google searches and reduce context
 switching while authoring Terraform.
 
 Features:
-- Open docs for resource/data/module blocks under cursor
+- Open docs for resource/data/ephemeral/action/list/module blocks under cursor
 - Resolve provider source (namespace/name) from required_providers
 - Resolve provider version from .terraform.lock.hcl
 - Best-effort deep linking to the argument/block under cursor (#anchor)
 - Open URLs via vim.ui.open() (cross-platform)
 - Copy resolved URL to clipboard
 - Peek resolved info (URL + trace) in a floating window
-- List all resources/data sources/modules in the current buffer
+- List all supported Terraform blocks in the current buffer
 - Print resolution trace for debugging
 - Clear internal caches
 
@@ -109,8 +109,8 @@ To route tf-docs -> LSP hover when docs aren't available:
 5. COMMANDS                                           *tf-docs.nvim-commands*
 
 :TfDocOpen                                                  *:TfDocOpen*
-        Resolve context (resource/data/module) and open its documentation URL
-        in your default browser via vim.ui.open().
+        Resolve a supported block under the cursor and open its documentation
+        URL in your default browser via vim.ui.open().
 
 :TfDocCopyUrl                                             *:TfDocCopyUrl*
         Resolve and copy the URL to your clipboard.
@@ -119,7 +119,7 @@ To route tf-docs -> LSP hover when docs aren't available:
         Print a resolution trace showing:
           - module directory
           - workspace root
-          - kind (resource/data/module)
+          - kind (resource/data/ephemeral/action/list/module)
           - type name
           - module source
           - provider source (namespace/name)
@@ -135,8 +135,8 @@ To route tf-docs -> LSP hover when docs aren't available:
         floating window. Same synchronous URL behavior as :TfDocDebug.
 
 :TfDocList                                                   *:TfDocList*
-        List all resources/data sources/modules in the current buffer and
-        open docs for the selected item.
+        List all supported Terraform blocks in the current buffer and open docs
+        for the selected item.
 
 :TfDocClearCache                                         *:TfDocClearCache*
         Clear all internal resolution caches. Provider and lockfile caches
@@ -164,7 +164,7 @@ arguments.
   tf.open()        -- resolve the symbol under cursor and open its docs
   tf.copy_url()    -- resolve and copy the docs URL to the clipboard
   tf.peek()        -- show the resolved URL + trace in a floating window
-  tf.list()        -- pick a resource/data/module and open its docs
+  tf.list()        -- pick a supported block and open its docs
   tf.clear_cache() -- clear internal caches
 
   -- resolve() returns the URL (or nil) and a trace without opening anything.
@@ -185,7 +185,7 @@ tf.peek({bufnr}, {opts})                                 *tf-docs.peek()*
         override module_dir and workspace_root.
 
 tf.list({bufnr}, {opts})                                 *tf-docs.list()*
-        List resource/data/module blocks in the buffer and open docs for the
+        List supported Terraform blocks in the buffer and open docs for the
         selected item. opts may override module_dir and workspace_root.
 
 tf.resolve({bufnr}, {opts})                           *tf-docs.resolve()*
@@ -286,7 +286,7 @@ anchor_providers_allowlist           *tf-docs.nvim-anchor_providers_allowlist*
 provider_overrides                           *tf-docs.nvim-provider_overrides*
         Override inferred provider name.
         Example: { google-beta = "google" } (so google-beta_* types
-        resolve via google). If a resource/data block includes
+        resolve via google). If a provider-backed block includes
         "provider = <alias>",
         tf-docs prefers that alias, then applies this override map.
 
@@ -365,7 +365,7 @@ scope_resolver can override either scope for monorepos. It is used by
 over the callback; remaining fields use automatic discovery.
 
 For a type like `google_compute_instance`:
-1. Detect context under cursor (resource/data/module).
+1. Detect a supported Terraform block under the cursor.
 2. Infer provider from type prefix (e.g. aws_instance -> aws).
    - If provider = <alias> is set in the block, that alias is preferred.
 3. Resolve provider source (namespace/name) from module required_providers.
@@ -414,6 +414,31 @@ Opens:
   https://registry.terraform.io/providers/hashicorp/aws/<version>/docs/
   data-sources/ami
 
+Ephemeral resource, action, and list resource examples.
+`ephemeral` requires Terraform 1.10+; `action` and `list` require
+Terraform 1.14+.
+>terraform
+  ephemeral "aws_ssm_parameter" "database_password" {
+    name = "/secrets/database/password"
+  }
+
+  action "aws_events_put_events" "publish" {
+    config {
+      # ...
+    }
+  }
+
+  # In a .tfquery.hcl file
+  list "aws_vpc" "existing" {
+    provider = aws
+  }
+<
+
+These open the matching provider documentation categories:
+  .../docs/ephemeral-resources/ssm_parameter
+  .../docs/actions/events_put_events
+  .../docs/list-resources/vpc
+
 Terraform built-in examples:
 >terraform
   resource "terraform_data" "bootstrap" {
@@ -456,7 +481,7 @@ limited by allowlist.
 ==============================================================================
 10. TROUBLESHOOTING                             *tf-docs.nvim-troubleshooting*
 
-"No terraform resource/data/module under cursor"
+"No supported Terraform block under cursor"
   - Ensure your buffer filetype is `terraform` or `hcl`:
     :set filetype?
   - If detection is inaccurate in complex files, ensure a `terraform` or

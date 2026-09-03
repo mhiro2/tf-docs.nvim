@@ -7,14 +7,14 @@ Open the *correct* Terraform documentation for the symbol under your cursor, wit
 
 - Resolves provider **namespace/name** from the current module's `required_providers`
 - Resolves provider **version** from the workspace's `.terraform.lock.hcl`
-- Opens Registry, Developer, or source docs for **resource / data source / module**
+- Opens Registry, Developer, or source docs for **provider-backed blocks and modules**
 - Optional best-effort deep-link to an **attribute / nested block anchor**
 
 This is designed to eliminate repeated Google searches and reduce context switching while authoring Terraform.
 
 ## 🎬 Demo
 
-### Select a resource/data source/module from a list and open docs
+### Select a supported Terraform block from a list and open docs
 
 <img src="https://github.com/user-attachments/assets/3632bc1a-7d29-4e37-83a9-73b94642e9f8" width="100%" alt="TfDocList: list and select" />
 
@@ -34,6 +34,9 @@ This is designed to eliminate repeated Google searches and reduce context switch
 - 🔎 Open the right Terraform docs for the symbol under your cursor:
   - `resource "<TYPE>" "<NAME>" { ... }`
   - `data "<TYPE>" "<NAME>" { ... }`
+  - `ephemeral "<TYPE>" "<NAME>" { ... }`
+  - `action "<TYPE>" "<NAME>" { ... }`
+  - `list "<TYPE>" "<NAME>" { ... }` in `.tfquery.hcl` files
   - `module "<NAME>" { source = "..." }` *(best-effort)*
 - 🧭 Resolve provider source (`namespace/name`) from the buffer's module directory
 - 🔒 Resolve provider version from the detected workspace root
@@ -41,7 +44,7 @@ This is designed to eliminate repeated Google searches and reduce context switch
 - 🌐 Open URLs via `vim.ui.open()` (cross-platform)
 - 📋 Copy resolved URL to clipboard
 - 👀 Peek resolved info (URL + trace) in a floating window
-- 📋 List all resources/data sources/modules in the current buffer
+- 📋 List all supported Terraform blocks in the current buffer
 - 🧪 Print a resolution trace for debugging
 - 🧹 Clear internal caches
 
@@ -115,7 +118,7 @@ Now place the cursor inside a Terraform block and press `gK` (or `K` if you opte
 ## 🧰 Commands
 
 * `:TfDocOpen`
-  Resolve context (resource/data/module) and open its documentation URL.
+  Resolve a supported block under the cursor and open its documentation URL.
 * `:TfDocCopyUrl`
   Resolve and copy the URL to your clipboard.
 * `:TfDocDebug`
@@ -128,7 +131,7 @@ Now place the cursor inside a Terraform block and press `gK` (or `K` if you opte
   Show a lightweight "peek" UI (resolved URL + trace) in a floating window. Same
   synchronous behavior as `:TfDocDebug` regarding the slug.
 * `:TfDocList`
-  List all resources/data sources/modules in the current buffer. Select one to open its documentation.
+  List all supported Terraform blocks in the current buffer. Select one to open its documentation.
 * `:TfDocVersion`
   Display provider versions from the workspace root's `.terraform.lock.hcl` in a floating window.
 * `:TfDocClearCache`
@@ -150,7 +153,7 @@ local tf = require("tf-docs")
 tf.open()        -- resolve the symbol under the cursor and open its docs
 tf.copy_url()    -- resolve and copy the docs URL to the clipboard
 tf.peek()        -- show the resolved URL + trace in a floating window
-tf.list()        -- pick a resource/data/module in the buffer and open its docs
+tf.list()        -- pick a supported block in the buffer and open its docs
 tf.clear_cache() -- clear all internal resolution caches
 
 -- resolve() returns the URL (or nil) and a trace without opening a browser
@@ -312,7 +315,7 @@ Fallbacks:
 ### How the docs slug is resolved
 
 The last path segment of a docs URL (the "slug") is **not** a deterministic
-transform of the resource/data type — it is the documentation filename the
+transform of the provider-backed block type — it is the documentation filename the
 provider authors chose. Most resources drop the provider prefix
 (`google_compute_instance` → `compute_instance`), but some keep it
 (`google_service_account` → `google_service_account`), and the same name can
@@ -331,7 +334,7 @@ the offline heuristic.
 
 ### Provider hints and overrides
 
-If a resource/data block includes `provider = <alias>`, tf-docs prefers that
+If a provider-backed block includes `provider = <alias>`, tf-docs prefers that
 alias when inferring the provider. You can normalize aliases via
 `provider_overrides` before URL building (e.g. `google-beta` -> `google`).
 
@@ -384,6 +387,33 @@ Opens:
 
 * `https://registry.terraform.io/providers/hashicorp/aws/<version>/docs/data-sources/ami`
 
+### Ephemeral resource, action, and list resource
+
+`ephemeral` requires Terraform 1.10+; `action` and `list` require Terraform 1.14+.
+
+```hcl
+ephemeral "aws_ssm_parameter" "database_password" {
+  name = "/secrets/database/password"
+}
+
+action "aws_events_put_events" "publish" {
+  config {
+    # ...
+  }
+}
+
+# In a .tfquery.hcl file
+list "aws_vpc" "existing" {
+  provider = aws
+}
+```
+
+These open the corresponding provider documentation categories:
+
+* `.../docs/ephemeral-resources/ssm_parameter`
+* `.../docs/actions/events_put_events`
+* `.../docs/list-resources/vpc`
+
 ### Terraform built-ins
 
 ```hcl
@@ -430,7 +460,7 @@ Anchor behavior is not guaranteed across all providers and is intentionally limi
 
 ## 🛠️ Troubleshooting
 
-### “No terraform resource/data/module under cursor”
+### “No supported Terraform block under cursor”
 
 * Ensure your buffer filetype is `terraform` or `hcl`:
 
