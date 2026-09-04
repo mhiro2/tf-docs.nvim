@@ -241,7 +241,8 @@ require("tf-docs").setup({
   -- UI backend for selection (e.g., `:TfDocList`).
   -- "auto": Detect and use external UI plugins (telescope/fzf-lua/snacks) if available, otherwise use built-in.
   -- "builtin": Always use built-in simple float window UI.
-  ui_select_backend = "auto", -- "auto" | "builtin"
+  -- "vim": Always call `vim.ui.select()` (for pickers that are not auto-detected).
+  ui_select_backend = "auto", -- "auto" | "builtin" | "vim"
 
   -- Notification threshold. Useful when debugging (`:TfDocDebug`), otherwise you can ignore it.
   log_level = "warn", -- "debug" | "info" | "warn" | "error"
@@ -347,12 +348,13 @@ The `:TfDocList` command uses a built-in simple float window UI by default. You 
   - `fzf-lua` (with `ui_select = true`)
   - `snacks.nvim` (picker)
 * **Built-in**: Always use the built-in cursor-relative float window
+* **Vim**: Always call `vim.ui.select()`, whatever is behind it
 
 If you prefer a specific UI:
 
 ```lua
 require("tf-docs").setup({
-  ui_select_backend = "builtin", -- or "auto" (default)
+  ui_select_backend = "builtin", -- or "auto" (default) / "vim"
 })
 ```
 
@@ -360,6 +362,47 @@ The built-in UI supports:
 - Navigation: `j`/`k` or `<C-n>`/`<C-p>`
 - Confirm: `<CR>`
 - Cancel: `<Esc>` or `q`
+
+#### Using your own picker (telescope / snacks / fzf-lua / mini.pick / ...)
+
+tf-docs does not ship picker-specific integrations. Instead it goes through
+`vim.ui.select()`, which every major picker can take over, and tags each call
+with `kind = "tf-docs"` so you can theme or route it separately from other
+prompts (LSP code actions, etc.).
+
+List entries are formatted as aligned columns to work well with fuzzy matching:
+
+```text
+resource   aws_instance.web                      (line 3)
+data       aws_ami.ubuntu                        (line 12)
+ephemeral  aws_secretsmanager_secret_version.db  (line 20)
+module     vpc                                   (line 31)
+```
+
+1. Make your picker handle `vim.ui.select()`:
+   - telescope: load `telescope-ui-select.nvim`
+   - fzf-lua: `require("fzf-lua").register_ui_select()` (or `ui_select = true` in its setup)
+   - snacks.nvim: `picker = { ui_select = true }` in `require("snacks").setup()`
+   - mini.pick: `vim.ui.select = require("mini.pick").ui_select`
+2. If your picker is one of telescope / fzf-lua / snacks, `ui_select_backend = "auto"`
+   detects it and nothing else is needed. For anything else (mini.pick, a custom
+   `vim.ui.select` wrapper, ...), set `ui_select_backend = "vim"`, otherwise
+   tf-docs falls back to its built-in list.
+
+To customize only tf-docs prompts, wrap `vim.ui.select` and branch on `opts.kind`:
+
+```lua
+local select = vim.ui.select
+vim.ui.select = function(items, opts, on_choice)
+  if opts and opts.kind == "tf-docs" then
+    -- Any picker API works here; this example uses snacks.nvim.
+    return Snacks.picker.select(items, vim.tbl_extend("force", opts, {
+      layout = { preset = "select" },
+    }), on_choice)
+  end
+  return select(items, opts, on_choice)
+end
+```
 
 ## 📚 Examples
 

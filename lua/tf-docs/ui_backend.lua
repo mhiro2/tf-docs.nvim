@@ -16,8 +16,14 @@ end
 
 ---@return boolean
 local function has_fzf_ui_select()
-  local ok_fzf, fzf = pcall(require, "fzf-lua")
-  return ok_fzf and type(fzf) == "table" and fzf.registered_ui_select == true
+  -- fzf-lua tracks registration inside its ui_select provider:
+  -- is_registered() compares vim.ui.select against its own implementation.
+  local ok, provider = pcall(require, "fzf-lua.providers.ui_select")
+  if not ok or type(provider) ~= "table" or type(provider.is_registered) ~= "function" then
+    return false
+  end
+  local ok_call, registered = pcall(provider.is_registered)
+  return ok_call and registered == true
 end
 
 ---@return boolean

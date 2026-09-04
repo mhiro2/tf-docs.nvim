@@ -167,6 +167,56 @@ function M.peek(bufnr, opts)
   ui.peek(trace)
 end
 
+---Pad `text` with spaces up to `width` display cells. Uses display width
+---rather than byte length so multibyte identifiers keep the columns aligned.
+---@param text string
+---@param width number
+---@return string
+local function pad_display(text, width)
+  local gap = width - vim.api.nvim_strwidth(text)
+  if gap <= 0 then
+    return text
+  end
+  return text .. string.rep(" ", gap)
+end
+
+---Build picker-friendly labels for the blocks returned by `ts.list_blocks`.
+---
+---Labels use aligned columns so they read well in fuzzy pickers and the
+---built-in list alike: `<kind>  <type>.<name>  (line N)`. Modules have no type,
+---so their address is just the name.
+---@param blocks TfDocsBlock[]
+---@return { label: string, block: TfDocsBlock }[]
+function M._format_list_items(blocks)
+  local addresses = {}
+  local kind_width, address_width = 0, 0
+  for i, block in ipairs(blocks) do
+    local address
+    if block.kind == "module" then
+      address = block.name
+    elseif block.name and block.name ~= "" then
+      address = string.format("%s.%s", block.type, block.name)
+    else
+      address = block.type
+    end
+    addresses[i] = address
+    kind_width = math.max(kind_width, vim.api.nvim_strwidth(block.kind))
+    address_width = math.max(address_width, vim.api.nvim_strwidth(address))
+  end
+
+  local items = {}
+  for i, block in ipairs(blocks) do
+    local label = string.format(
+      "%s  %s  (line %d)",
+      pad_display(block.kind, kind_width),
+      pad_display(addresses[i], address_width),
+      block.line
+    )
+    table.insert(items, { label = label, block = block })
+  end
+  return items
+end
+
 ---List supported Terraform blocks in the buffer and open docs for the choice.
 ---@param bufnr? number Buffer to list (defaults to the current buffer).
 ---@param opts? TfDocsScopeOpts Explicit scope overrides.
@@ -185,19 +235,11 @@ function M.list(bufnr, opts)
     return
   end
 
-  local items = {}
-  for _, block in ipairs(blocks) do
-    local label
-    if block.kind == "module" then
-      label = string.format("[%s] %s (line %d)", block.kind, block.name, block.line)
-    else
-      label = string.format("[%s] %s (line %d)", block.kind, block.type, block.line)
-    end
-    table.insert(items, { label = label, block = block })
-  end
+  local items = M._format_list_items(blocks)
 
   ui.select(items, {
     prompt = "Select a Terraform block to open docs:",
+    kind = ui.SELECT_KIND,
     format_item = function(item)
       return item.label
     end,

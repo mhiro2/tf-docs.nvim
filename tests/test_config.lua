@@ -13,6 +13,9 @@ T["config validates ui_select_backend with valid values"] = function()
 
   cfg = config.setup({ ui_select_backend = "builtin" })
   expect.equality(cfg.ui_select_backend, "builtin")
+
+  cfg = config.setup({ ui_select_backend = "vim" })
+  expect.equality(cfg.ui_select_backend, "vim")
 end
 
 T["config falls back to default for invalid ui_select_backend"] = function()

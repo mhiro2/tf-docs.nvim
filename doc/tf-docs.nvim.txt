@@ -240,7 +240,7 @@ Default config:
     registry_timeout_ms = 1500,
 
     -- UI backend for selection (e.g., :TfDocList)
-    ui_select_backend = "auto", -- "auto" | "builtin"
+    ui_select_backend = "auto", -- "auto" | "builtin" | "vim"
 
     -- Notification threshold
     log_level = "warn", -- "debug" | "info" | "warn" | "error"
@@ -333,6 +333,20 @@ ui_select_backend                          *tf-docs.nvim-ui_select_backend*
           - "auto": use external UI plugins if available (telescope-ui-select,
             fzf-lua with ui_select, or snacks.nvim picker), otherwise built-in
           - "builtin": always use the built-in floating list (cursor + <CR>)
+          - "vim": always call |vim.ui.select()|; use this for pickers that
+            "auto" does not detect (mini.pick, a custom wrapper, ...)
+
+        tf-docs has no picker-specific integration. Every external backend
+        goes through |vim.ui.select()| with `opts.kind = "tf-docs"`, so a
+        wrapper around `vim.ui.select` can theme or route tf-docs prompts
+        separately from other prompts (e.g. LSP code actions).
+
+        :TfDocList entries are aligned columns so fuzzy matching works on the
+        kind, the address, and the line number: >
+            resource   aws_instance.web   (line 3)
+            data       aws_ami.ubuntu     (line 12)
+            module     vpc                (line 31)
+<
 
 log_level                                             *tf-docs.nvim-log_level*
         Notification threshold:
